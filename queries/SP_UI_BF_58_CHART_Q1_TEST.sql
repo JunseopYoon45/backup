@@ -1,0 +1,360 @@
+CREATE OR REPLACE PROCEDURE DWSCM_DEV."SP_UI_BF_58_CHART_Q1_TEST" (
+      p_ITEM_CD		VARCHAR2
+    , p_ACCOUNT_CD	VARCHAR2
+    , p_S_DATE		date
+    , p_E_DATE		date
+    , p_ITEM_LV_ID	VARCHAR2
+    , p_ACCT_LV_ID	VARCHAR2
+    , p_SUM			VARCHAR2
+    , pRESULT         OUT SYS_REFCURSOR
+)IS 
+/*
+		History (date / writer / comment)
+		-- 2023.03.10 / Joonseo Oh / WK52 JOIN에서 DP_WK JOIN으로 변경 (판매실적보정과 동일)
+							   	   / 판매실적보정 DRAG를 위해 ID까지 조회
+ */
+v_EXISTS_NUM INT :=0;
+
+BEGIN
+
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM TB_CM_LEVEL_MGMT WHERE ID = p_ACCT_LV_ID AND LEAF_YN = 'Y') THEN '1' ELSE '0' END INTO v_EXISTS_NUM
+      FROM DUAL;
+
+    IF (v_EXISTS_NUM='1')
+    THEN
+        INSERT INTO TEMP_ACCT_LV
+        SELECT ID
+              ,ACCOUNT_CD
+              ,ACCOUNT_NM
+              ,'Y'  		AS ACCT_LEAF_YN 
+        FROM TB_DP_ACCOUNT_MST
+        WHERE DEL_YN = 'N'
+        	AND ACTV_YN = 'Y'
+        	AND PARENT_SALES_LV_ID IS NOT NULL
+         ;
+	ELSE
+        INSERT INTO TEMP_ACCT_LV
+        SELECT ID
+              ,SALES_LV_CD  AS ACCOUNT_CD
+              ,SALES_LV_NM  AS ACCOUNT_NM     
+              ,'N'          AS ACCT_LEAF_YN
+        FROM TB_DP_SALES_LEVEL_MGMT
+        WHERE LV_MGMT_ID = p_ACCT_LV_ID
+        	AND ACTV_YN = 'Y'
+            AND DEL_YN = 'N'
+        ;
+    END IF;
+
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM TB_CM_LEVEL_MGMT WHERE ID = p_ITEM_LV_ID AND LEAF_YN = 'Y') THEN '1' ELSE '0' END INTO v_EXISTS_NUM
+      FROM DUAL;
+
+    IF (v_EXISTS_NUM='1')
+    THEN
+        INSERT INTO TEMP_ITEM_LV
+        SELECT ID
+              ,ITEM_CD
+              ,ITEM_NM
+              ,'Y'      	AS ITEM_LEAF_YN 
+        FROM TB_CM_ITEM_MST
+        WHERE DEL_YN = 'N'
+        	AND DP_PLAN_YN = 'Y'	
+            AND PARENT_ITEM_LV_ID IS NOT NULL 
+         ;
+	ELSE
+        INSERT INTO TEMP_ITEM_LV
+        SELECT ID
+              ,ITEM_LV_CD   AS ITEM_CD
+              ,ITEM_LV_NM   AS ITEM_NM
+              ,'N'          AS ITEM_LEAF_YN
+        FROM TB_CM_ITEM_LEVEL_MGMT
+        WHERE LV_MGMT_ID = p_ITEM_LV_ID 
+        	AND ACTV_YN = 'Y'
+            AND DEL_YN = 'N'
+        ;
+    END IF;
+
+    IF (p_SUM = 'Y') THEN
+    OPEN pRESULT FOR
+		WITH ITEM_IDS AS (
+			SELECT DISTINCT
+					ANCESTER_CD         AS PA_ITEM_CD
+					, ITEM_NM
+					, DESCENDANT_CD     AS ITEM_CD
+					, DESCENDANT_ID     AS ITEM_ID
+	                , ITEM_LEAF_YN
+			FROM TB_DPD_ITEM_HIER_CLOSURE IH
+			INNER JOIN TEMP_ITEM_LV IL
+				ON IL.ITEM_CD = IH.ANCESTER_CD
+			WHERE 1=1
+	        	AND ( REGEXP_LIKE (UPPER(ANCESTER_CD), REPLACE(REPLACE(REPLACE(REPLACE(UPPER(p_ITEM_CD), ')', '\)'), '(', '\('), ']', '\]'), '[', '\[')) 
+	                  OR p_ITEM_CD IS NULL
+	                )
+				AND LEAF_YN = 'Y'
+		),
+		ACCT_IDS AS (
+			SELECT DISTINCT
+					ANCESTER_CD 		AS PA_ACCOUNT_CD
+					, ACCOUNT_NM
+					, DESCENDANT_CD 	AS ACCOUNT_CD
+					, DESCENDANT_ID 	AS ACCOUNT_ID
+	                , ACCT_LEAF_YN
+			FROM TB_DPD_SALES_HIER_CLOSURE SH
+			INNER JOIN TEMP_ACCT_LV AL
+				ON AL.ACCOUNT_CD = SH.ANCESTER_CD
+			WHERE 1=1
+	        	AND ( REGEXP_LIKE (UPPER(ANCESTER_CD), REPLACE(REPLACE(REPLACE(REPLACE(UPPER(p_ACCOUNT_CD), ')', '\)'), '(', '\('), ']', '\]'), '[', '\[')) 
+	                    OR p_ACCOUNT_CD IS NULL
+	                )
+				AND LEAF_YN = 'Y'
+		),
+		LEAF_RAW_DATA AS (
+			SELECT SA.BASE_DATE     	AS BASE_DATE
+					, I.PA_ITEM_CD      AS PA_ITEM_CD
+					, A.PA_ACCOUNT_CD   AS PA_ACCOUNT_CD
+					, I.ITEM_CD         AS ITEM_CD
+					, ITEM_NM
+					, A.ACCOUNT_CD      AS ACCOUNT_CD
+					, ACCOUNT_NM
+	                , ITEM_LEAF_YN
+	                , ACCT_LEAF_YN
+					, CASE WHEN SA.CORRECTION_YN = 'Y'
+					  	THEN SA.QTY_CORRECTION
+						ELSE SA.QTY END AS QTY
+					, SA.QTY 			AS QTY_ACTUAL
+					, CASE WHEN SA.CORRECTION_YN = 'Y'
+					  	THEN SA.AMT_CORRECTION
+						ELSE SA.AMT END AS AMT
+					, SA.AMT			AS AMT_ACTUAL
+					, MIN(SA.BASE_DATE) OVER(PARTITION BY I.ITEM_CD, A.ACCOUNT_CD, CA.DP_WK ORDER BY SA.BASE_DATE) AS MIN_DATE
+	                , SA.ID
+	                , NVL(R.CONF_CD, 'NN') AS CORRECTION_COMMENT
+	                , SA.MODIFY_BY
+	                , SA.MODIFY_DTTM
+			FROM TB_CM_ACTUAL_SALES SA
+			INNER JOIN ITEM_IDS I
+				ON I.ITEM_ID = SA.ITEM_MST_ID
+			INNER JOIN ACCT_IDS A
+				ON A.ACCOUNT_ID = SA.ACCOUNT_ID
+			INNER JOIN TB_CM_CALENDAR CA
+				ON SA.BASE_DATE = CA.DAT
+	        LEFT OUTER JOIN TB_CM_COMM_CONFIG R
+	            ON SA.CORRECTION_COMMENT_ID = R.ID
+			WHERE SA.BASE_DATE BETWEEN p_S_DATE AND p_E_DATE
+		), 
+	    BASE_CAL AS (
+			SELECT DAT
+	             , YYYY
+	             , QTR
+	             , CONCAT(CONCAT(YYYY, ' '), QTR_NM) AS YYYYQTR
+				 , YYYYMM
+	             , MM
+				 , DOW
+				 , WK52
+				 , DP_WK
+	             , CAST(TO_CHAR(dat, 'IW') AS VARCHAR(2)) AS ISO_WK
+			FROM TB_CM_CALENDAR
+			WHERE DAT BETWEEN p_S_DATE AND p_E_DATE
+		),
+		MON_DATE AS (
+			SELECT PA_ACCOUNT_CD
+				 , MIN(ACCOUNT_NM) ACCOUNT_NM
+				 , MIN(ACCOUNT_ID) ACCOUNT_ID
+				 , PA_ITEM_CD
+				 , MIN(ITEM_NM) ITEM_NM
+				 , MIN(ITEM_ID) ITEM_ID
+				 , MIN(DAT) DAT
+				 , MIN(YYYY) YYYY
+				 , MIN(QTR) QTR
+				 , MIN(CONCAT(CONCAT(YYYY, ' '), QTR_NM)) AS YYYYQTR
+				 , MIN(YYYYMM) YYYYMM
+				 , MIN(MM) MM
+				 , MIN(DOW) DOW
+				 , MIN(WK52) WK52
+				 , DP_WK
+				 , MIN(CAST(TO_CHAR(dat, 'IW') AS VARCHAR(2))) AS ISO_WK
+			FROM TB_CM_CALENDAR CA
+			CROSS JOIN ACCT_IDS A
+			CROSS JOIN ITEM_IDS I
+			WHERE DAT BETWEEN p_S_DATE AND p_E_DATE
+			GROUP BY PA_ACCOUNT_CD, PA_ITEM_CD, DP_WK
+		),
+		SALES AS (
+		SELECT MD.PA_ACCOUNT_CD 		AS ACCOUNT_CD
+	    	   , MIN(MD.ACCOUNT_NM) 	AS ACCOUNT_NM
+	    	   , MIN(MD.ACCOUNT_ID)    	AS ACCOUNT_ID
+	           , MD.PA_ITEM_CD   		AS ITEM_CD
+	           , MIN(MD.ITEM_NM) 		AS ITEM_NM
+	           , MIN(MD.ITEM_ID)   		AS ITEM_ID
+	           , MD.DAT 				AS BASE_DATE
+	           , NVL(SUM(LRD.QTY), 0)   AS QTY
+	           , NVL(SUM(LRD.QTY_ACTUAL), 0)   AS QTY_ACTUAL
+	           , NVL(SUM(LRD.AMT), 0)	AS AMT
+	           , MIN(MD.YYYY) 		    AS YYYY
+	           , MIN(MD.YYYYQTR) 		AS YYYYQTR
+	           , MIN(MD.QTR)     		AS QTR
+	           , MIN(MD.MM)      		AS MM
+	           , MIN(MD.DOW)     		AS DOW
+	           , MIN(MD.DP_WK)     		AS DP_WK
+	           , MIN(MD.WK52)    		AS WK52
+	           , MIN(MD.YYYYMM)  		AS YYYYMM
+	           , MIN(MD.ISO_WK)  		AS ISO_WK
+	           , MIN(LRD.MIN_DATE)		   AS MIN_DATE
+	    FROM LEAF_RAW_DATA LRD
+	    INNER JOIN BASE_CAL CA
+	    	ON LRD.BASE_DATE = CA.DAT
+	    RIGHT JOIN MON_DATE MD 
+	    	ON CA.DP_WK = MD.DP_WK 
+	      		AND LRD.PA_ACCOUNT_CD = MD.PA_ACCOUNT_CD 
+	      		AND LRD.PA_ITEM_CD = MD.PA_ITEM_CD
+	    GROUP BY MD.PA_ACCOUNT_CD, MD.PA_ITEM_CD, MD.DAT
+	    )
+	    SELECT * FROM SALES
+	--    OUTER APPLY (
+	--               SELECT Z.ID, Z.CORRECTION_COMMENT, Z.MODIFY_BY, Z.MODIFY_DTTM
+	--                 FROM (
+	--                      SELECT S.ID,NVL(R.CONF_CD, 'NN') AS CORRECTION_COMMENT, S.MODIFY_BY, S.MODIFY_DTTM
+	--                        FROM TB_CM_ACTUAL_SALES S
+	--                             LEFT OUTER JOIN TB_CM_COMM_CONFIG R ON S.CORRECTION_COMMENT_ID = R.ID
+	--                       WHERE SALES.ITEM_ID     = S.ITEM_MST_ID
+	--                         AND SALES.ACCOUNT_ID  = S.ACCOUNT_ID
+	--                         AND SALES.MIN_DATE    = S.BASE_DATE
+	--                       ORDER BY S.ID
+	--                      ) Z
+	--                 WHERE ROWNUM=1
+	--               ) T
+	    ORDER BY 1, 2, 3, 4, 5, 6, 7
+	    ;
+	DELETE FROM TEMP_ACCT_LV;
+	DELETE FROM TEMP_ITEM_LV;
+
+	ELSE
+	OPEN pRESULT FOR
+		WITH ITEM_IDS AS (
+			SELECT DISTINCT
+					ANCESTER_CD         AS PA_ITEM_CD
+					, ITEM_NM
+					, DESCENDANT_CD     AS ITEM_CD
+					, DESCENDANT_ID     AS ITEM_ID
+	                , ITEM_LEAF_YN
+			FROM TB_DPD_ITEM_HIER_CLOSURE IH
+			INNER JOIN TEMP_ITEM_LV IL
+				ON IL.ITEM_CD = IH.ANCESTER_CD
+			WHERE 1=1
+	        	AND ( REGEXP_LIKE (UPPER(ANCESTER_CD), REPLACE(REPLACE(REPLACE(REPLACE(UPPER(p_ITEM_CD), ')', '\)'), '(', '\('), ']', '\]'), '[', '\[')) 
+	                  OR p_ITEM_CD IS NULL
+	                )
+				AND LEAF_YN = 'Y'
+		),
+		ACCT_IDS AS (
+			SELECT DISTINCT
+					ANCESTER_CD 		AS PA_ACCOUNT_CD
+					, ACCOUNT_NM
+					, DESCENDANT_CD 	AS ACCOUNT_CD
+					, DESCENDANT_ID 	AS ACCOUNT_ID
+	                , ACCT_LEAF_YN
+			FROM TB_DPD_SALES_HIER_CLOSURE SH
+			INNER JOIN TEMP_ACCT_LV AL
+				ON AL.ACCOUNT_CD = SH.ANCESTER_CD
+			WHERE 1=1
+	        	AND ( REGEXP_LIKE (UPPER(ANCESTER_CD), REPLACE(REPLACE(REPLACE(REPLACE(UPPER(p_ACCOUNT_CD), ')', '\)'), '(', '\('), ']', '\]'), '[', '\[')) 
+	                    OR p_ACCOUNT_CD IS NULL
+	                )
+				AND LEAF_YN = 'Y'
+		),
+		LEAF_RAW_DATA AS (
+		SELECT SA.BASE_DATE     	AS BASE_DATE
+				, A.PA_ACCOUNT_CD   AS PA_ACCOUNT_CD
+				, I.ITEM_CD         AS ITEM_CD
+				, I.ITEM_NM
+				, A.ACCOUNT_CD      AS ACCOUNT_CD
+				, ACCOUNT_NM
+				, CASE WHEN SA.CORRECTION_YN = 'Y'
+				  	THEN SA.QTY_CORRECTION
+					ELSE SA.QTY END AS QTY
+				, SA.QTY 			AS QTY_ACTUAL
+				, CASE WHEN SA.CORRECTION_YN = 'Y'
+				  	THEN SA.AMT_CORRECTION
+					ELSE SA.AMT END AS AMT
+				, SA.AMT			AS AMT_ACTUAL
+				, CA.DP_WK
+	            , SA.ID
+	            , NVL(R.CONF_CD, 'NN') AS CORRECTION_COMMENT
+	            , SA.MODIFY_BY
+	            , SA.MODIFY_DTTM
+		FROM TB_CM_ACTUAL_SALES SA
+		INNER JOIN ITEM_IDS I
+			ON I.ITEM_ID = SA.ITEM_MST_ID
+		INNER JOIN ACCT_IDS A
+			ON A.ACCOUNT_ID = SA.ACCOUNT_ID
+		INNER JOIN TB_CM_CALENDAR CA
+			ON SA.BASE_DATE = CA.DAT
+	    LEFT OUTER JOIN TB_CM_COMM_CONFIG R
+	        ON SA.CORRECTION_COMMENT_ID = R.ID
+			WHERE SA.BASE_DATE BETWEEN '2020-01-01' AND '2023-06-19'
+	   ) 
+	   , BASE_CAL AS (
+			SELECT DAT
+	             , YYYY
+	             , QTR
+	             , CONCAT(CONCAT(YYYY, ' '), QTR_NM) AS YYYYQTR
+				 , YYYYMM
+	             , MM
+				 , DOW
+				 , WK52
+				 , DP_WK
+	             , CAST(TO_CHAR(dat, 'IW') AS VARCHAR(2)) AS ISO_WK
+			FROM TB_CM_CALENDAR
+			WHERE DAT BETWEEN '2020-01-01' AND '2023-06-19'
+		) 
+		, MON_DATE AS (
+			SELECT MIN(ACCOUNT_NM) ACCOUNT_NM
+				 , MIN(ACCOUNT_ID) ACCOUNT_ID
+				 , PA_ACCOUNT_CD AS ACCOUNT_CD
+				 , MIN(ITEM_NM) ITEM_NM
+				 , MIN(ITEM_ID) ITEM_ID
+				 , ITEM_CD
+				 , MIN(DAT) BASE_DATE
+				 , MIN(YYYY) YYYY
+				 , MIN(QTR) QTR
+				 , MIN(CONCAT(CONCAT(YYYY, ' '), QTR_NM)) AS YYYYQTR
+				 , MIN(YYYYMM) YYYYMM
+				 , MIN(MM) MM
+				 , MIN(DOW) DOW
+				 , MIN(WK52) WK52
+				 , DP_WK
+				 , MIN(CAST(TO_CHAR(dat, 'IW') AS VARCHAR(2))) AS ISO_WK
+			FROM TB_CM_CALENDAR CA
+			CROSS JOIN ACCT_IDS A
+			CROSS JOIN ITEM_IDS I
+			WHERE DAT BETWEEN '2020-01-01' AND '2023-06-19'
+			GROUP BY PA_ACCOUNT_CD, ITEM_CD, DP_WK
+		) 
+		,
+		SALES AS (
+		SELECT MD.ACCOUNT_CD 		AS ACCOUNT_CD
+	    	   , MD.ACCOUNT_NM 	AS ACCOUNT_NM
+	           , MD.ITEM_CD   		AS ITEM_CD
+	           , MD.ITEM_NM 		AS ITEM_NM
+	           , MD.BASE_DATE 				AS BASE_DATE
+	           , NVL(SUM(LRD.QTY), 0)   AS QTY
+	           , NVL(SUM(LRD.QTY_ACTUAL), 0)   AS QTY_ACTUAL
+	           , NVL(SUM(LRD.AMT), 0)	AS AMT
+	           , MIN(MD.YYYY) AS YYYY
+	           , MIN(MD.YYYYQTR) AS YYYYQTR
+	           , MIN(MD.QTR) AS QTR
+	           , MIN(MD.MM) AS MM
+	           , MIN(MD.DOW) AS DOW
+	           , MIN(MD.DP_WK) AS DP_WK
+	           , MIN(MD.WK52) AS WK52
+	           , MIN(MD.YYYYMM) AS YYYYMM
+	           , MIN(MD.ISO_WK) AS ISO_WK
+	    FROM LEAF_RAW_DATA LRD
+	    RIGHT JOIN MON_DATE MD 
+	    	ON LRD.DP_WK = MD.DP_WK AND LRD.ITEM_CD = MD.ITEM_CD AND LRD.PA_ACCOUNT_CD = MD.ACCOUNT_CD
+	    GROUP BY MD.ACCOUNT_CD, MD.ACCOUNT_NM, MD.ITEM_CD, MD.ITEM_NM, MD.BASE_DATE
+	    )
+	    SELECT * FROM SALES ORDER BY 1 DESC, 3, 5;
+	    DELETE FROM TEMP_ACCT_LV;
+		DELETE FROM TEMP_ITEM_LV;
+	END IF;
+END;
