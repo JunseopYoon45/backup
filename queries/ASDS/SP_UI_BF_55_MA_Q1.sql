@@ -1,0 +1,109 @@
+CREATE OR REPLACE PROCEDURE DWSCM."SP_UI_BF_55_MA_Q1" (
+     p_VER_CD         VARCHAR2
+	,p_FROM_DATE	  DATE := NULL
+	,p_TO_DATE		  DATE := NULL
+	,p_ITEM_LV		  VARCHAR2 := NULL -- id 로 넘어옴
+	,p_CATE_CD		  VARCHAR2 := NULL
+    ,pRESULT          OUT SYS_REFCURSOR
+)IS 
+
+v_TO_DATE date:='';
+v_EXISTS_NUM INT :=0;
+
+BEGIN
+
+    v_TO_DATE := p_TO_DATE;
+
+    OPEN pRESULT FOR
+    WITH ITEM_HIER AS (
+            SELECT IH.DESCENDANT_ID AS DESC_ID
+                  ,IH.DESCENDANT_CD AS DESC_CD
+                  ,IH.ANCESTER_CD AS ANCS_CD
+                  ,IL.ITEM_LV_NM AS ANCS_NM
+             FROM TB_DPD_ITEM_HIER_CLOSURE IH
+                  INNER JOIN
+                  TB_CM_ITEM_LEVEL_MGMT IL
+               ON IH.ANCESTER_ID = IL.ID
+                  INNER JOIN
+                  TB_CM_ITEM_MST IM
+               ON IH.DESCENDANT_CD = IM.ITEM_CD
+             WHERE 1=1
+               AND IL.LV_MGMT_ID = p_ITEM_LV
+               AND ( REGEXP_LIKE (UPPER(ANCESTER_CD), REPLACE(REPLACE(REPLACE(REPLACE(UPPER(p_CATE_CD), ')', '\)'), '(', '\('), ']', '\]'), '[', '\[')) 
+                    OR p_CATE_CD IS NULL
+                   )
+               AND IH.LEAF_YN = 'Y'
+    )
+    , ACT_SALES AS (
+	        SELECT IH.ANCS_CD AS ITEM_CD
+	             , IH.ANCS_NM AS ITEM_NM
+	             , TRUNC(BASE_DATE, 'MONTH') AS BASE_DATE
+	             , SUM(S.AMT) QTY
+	          FROM TB_CM_ACTUAL_SALES S
+	         INNER JOIN ITEM_HIER IH ON IH.DESC_ID = S.ITEM_MST_ID
+	         INNER JOIN TB_CM_ITEM_MST IM ON S.ITEM_MST_ID=IM.ID
+	         WHERE TRUNC(S.BASE_DATE, 'MONTH') BETWEEN p_FROM_DATE AND v_TO_DATE
+	         GROUP BY ANCS_CD, ANCS_NM, TRUNC(BASE_DATE, 'MONTH')
+    )
+    , FINAL AS (
+            SELECT F.VER_CD
+                 , F.ITEM_CD
+                 , BASE_DATE
+                 , SUM(F.QTY) QTY
+                 , MIN(F.BEST_ENGINE_TP_CD) ENGINE_TP_CD
+             FROM TB_BF_RT_FINAL_MA F
+            WHERE F.VER_CD = p_VER_CD AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE
+            GROUP BY F.VER_CD, ITEM_CD, BASE_DATE
+    ),
+    WAPE AS (
+        select A.ITEM_CD
+             , B.ITEM_NM
+             , A.BASE_DATE
+             -- 예측
+             , A.QTY PREDICT
+             -- 실적
+             , B.QTY ACT_SALES
+             -- 개별정확도
+             , CASE WHEN B.QTY = 0 THEN 0 ELSE (CASE WHEN (1-ABS(A.QTY-B.QTY)/B.QTY) >= 0 THEN (1-ABS(A.QTY-B.QTY)/B.QTY)*100 ELSE 0 END) END WAPE
+             , A.ENGINE_TP_CD
+          FROM FINAL A
+         INNER JOIN ACT_SALES B ON A.ITEM_CD=B.ITEM_CD AND A.BASE_DATE = B.BASE_DATE
+    )
+    , RT_ACCRY AS (
+			SELECT ITEM_CD ITEM
+					, ITEM_NM ITEM_NM
+					, MIN(ENGINE_TP_CD) ENGINE_TP_CD
+					, 'ACT_SALES_QTY' AS CATEGORY
+					, BASE_DATE AS "DATE"
+					, CAST(FLOOR(SUM(ACT_SALES)) AS VARCHAR2(10)) ACCRY
+					, 1 AS ORDER_VAL
+			FROM WAPE
+			GROUP BY ITEM_CD, ITEM_NM, BASE_DATE
+			UNION 
+			SELECT ITEM_CD ITEM
+					, ITEM_NM ITEM_NM
+					, MIN(ENGINE_TP_CD) ENGINE_TP_CD
+					, 'BF_QTY' AS CATEGORY
+					, BASE_DATE AS "DATE"
+					, CAST(FLOOR(SUM(PREDICT)) AS VARCHAR2(10)) ACCRY
+					, 2 AS ORDER_VAL
+			FROM WAPE
+			GROUP BY ITEM_CD, ITEM_NM, BASE_DATE
+			UNION
+			SELECT ITEM_CD ITEM
+					, ITEM_NM ITEM_NM
+					, MIN(ENGINE_TP_CD) ENGINE_TP_CD
+					, 'DMND_PRDICT_ACCURCY' AS CATEGORY
+					, BASE_DATE AS "DATE"
+					, CASE WHEN SUM(ACT_SALES) = 0 THEN '0%'
+				 		   WHEN SUM(ACT_SALES) IS NULL THEN NULL
+				           WHEN (1 - ABS(SUM(ACT_SALES) - SUM(PREDICT)) / SUM(ACT_SALES)) * 100 <= 0 THEN '0%'
+				           ELSE RTRIM(TO_CHAR(ROUND((1 - ABS(SUM(ACT_SALES) - SUM(PREDICT)) / SUM(ACT_SALES)) * 100, 1)), TO_CHAR(0, 'D')) || '%' END ACCRY
+					, 3 AS ORDER_VAL
+			FROM WAPE
+			GROUP BY ITEM_CD, ITEM_NM, BASE_DATE
+    )
+    SELECT * FROM RT_ACCRY
+    ORDER BY ITEM, "DATE", ORDER_VAL;
+
+END;
