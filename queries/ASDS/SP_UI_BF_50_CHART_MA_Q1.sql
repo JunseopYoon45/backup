@@ -10,7 +10,17 @@ CREATE OR REPLACE PROCEDURE DWSCM."SP_UI_BF_50_CHART_MA_Q1"
     pRESULT         OUT SYS_REFCURSOR  
 )
 IS 
-
+  /**************************************************************************
+   * Copyrightⓒ2023 ZIONEX, All rights reserved.
+   **************************************************************************
+   * Name : SP_UI_BF_50_CHART_MA_Q1
+   * Purpose : 월/총량 수요예측 결과 차트 조회
+   * Notes :
+   * 	M20180115092445697M411878346346N	ITEM_ALL	상품전체
+		N20180115092528519N506441512113N	LEVEL1		대분류
+		N20180115092559329M499525073971N	LEVEL2		중분류
+		FA5FEBBCADDED90DE053DD0A10AC8DB5	LEVEL3		소분류
+   **************************************************************************/
     p_TARGET_FROM_DATE  DATE := NULL;
     v_TO_DATE           DATE := NULL;
     v_BUKT              VARCHAR2(5);
@@ -31,7 +41,8 @@ BEGIN
    
 	SELECT CASE WHEN p_ITEM_LV = 'FA5FEBBCADDED90DE053DD0A10AC8DB5' THEN '0' ELSE '1' END INTO v_EXISTS_NUM
   	FROM DUAL;
-   
+  
+    /* 합계 조회 O, 소분류 이상, BEST SELECT N인 조건 */
     IF p_SUM = 'Y' AND v_EXISTS_NUM = 1 AND p_BEST_SELECT_YN = 'N'
     THEN 
     OPEN pRESULT FOR
@@ -79,25 +90,43 @@ BEGIN
          GROUP BY BUKT 
     )
     , SA AS (
-        SELECT IH2.ANCS_CD 	AS ITEM_CD
+   		SELECT IH2.ANCS_CD 	AS ITEM_CD
              , CA.STRT_DATE
              , CA.BUKT 
-             , SUM(AMT)		AS QTY 
-          FROM TB_CM_ACTUAL_SALES S
+             , ROUND(SUM(SAL_AMT), 2)		AS QTY 
+          FROM DS_TB_IF_SALESPLAN_DIVSAL S
          INNER JOIN CA 
-         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
-         INNER JOIN TB_CM_ITEM_MST IM 
-         	ON S.ITEM_MST_ID = IM.ID 
-           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+         	ON S.YYYYMM = CA.BUKT           
          INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
-         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+         	ON S.DIV_COD = IH.DESCENDANT_CD
          INNER JOIN ITEM_HIER IH2 
          	ON IH2.DESC_CD = IH.ANCESTER_CD
          WHERE 1=1 
-           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
-           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
-         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE
+           AND IH2.ANCS_CD LIKE p_ITEM||'%' 
+           AND CA.STRT_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
+         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE    
     )
+--    , SA AS (
+--        SELECT IH2.ANCS_CD 	AS ITEM_CD
+--             , CA.STRT_DATE
+--             , CA.BUKT 
+--             , SUM(AMT)		AS QTY 
+--          FROM TB_CM_ACTUAL_SALES S
+--         INNER JOIN CA 
+--         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
+--         INNER JOIN TB_CM_ITEM_MST IM 
+--         	ON S.ITEM_MST_ID = IM.ID 
+--           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+--         INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
+--         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+--         INNER JOIN ITEM_HIER IH2 
+--         	ON IH2.DESC_CD = IH.ANCESTER_CD
+--         WHERE 1=1 
+----           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
+--           AND IH2.ANCS_CD LIKE p_ITEM||'%' 
+--           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
+--         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE
+--    )
     , N AS (
         SELECT RT.ITEM_CD		AS ITEM_CD
              , CA.BUKT
@@ -107,7 +136,7 @@ BEGIN
          INNER JOIN CA 
          	ON RT.BASE_DATE BETWEEN CA.STRT_DATE AND END_DATE
     	 GROUP BY ITEM_CD, CA.BUKT, ENGINE_TP_CD 
-         UNION
+         UNION ALL
         SELECT SA.ITEM_CD
              , BUKT
              , 'Z_ACT_SALES'	AS ENGINE_TP_CD
@@ -142,11 +171,12 @@ BEGIN
        AND M.ENGINE_TP_CD = N.ENGINE_TP_CD
      INNER JOIN TB_CM_CALENDAR C 
         ON M.BUKT = C.YYYYMM           
-     WHERE C.DD = 1 
+     WHERE C.DD = '1' 
      ORDER BY M.ENGINE_TP_CD, M.STRT_DATE
      ;
     COMMIT;
   
+    /* 합계 조회 O, 소분류 이상, BEST SELECT Y인 조건 */
     ELSIF p_SUM = 'Y' AND v_EXISTS_NUM = 1 AND p_BEST_SELECT_YN = 'Y'
     THEN 
     OPEN pRESULT FOR
@@ -170,17 +200,9 @@ BEGIN
              , BASE_DATE 
              , 'FCST'				AS ENGINE_TP_CD
              , COALESCE(SUM(QTY),0)	AS QTY
-          FROM TB_BF_RT_MA RT
+          FROM TB_BF_RT_FINAL_MA RT
          INNER JOIN ITEM_HIER IH 
          	ON RT.ITEM_CD = IH.DESC_CD
-         INNER JOIN (SELECT ITEM_CD
-         				  , ENGINE_TP_CD
-         			  FROM TB_BF_RT_ACCRCY_MA
-         			 WHERE 1=1
-         			   AND SELECT_SEQ = 1
-         			   AND VER_CD = p_VER_CD) AC
-            ON RT.ITEM_CD = AC.ITEM_CD
-           AND RT.ENGINE_TP_CD = AC.ENGINE_TP_CD
          WHERE BASE_DATE BETWEEN p_FROM_DATE and v_TO_DATE
            AND VER_CD = p_VER_CD
          GROUP BY IH.ANCS_CD, BASE_DATE  
@@ -202,25 +224,43 @@ BEGIN
          GROUP BY BUKT 
     )
     , SA AS (
-        SELECT IH2.ANCS_CD 	AS ITEM_CD
+   		SELECT IH2.ANCS_CD 	AS ITEM_CD
              , CA.STRT_DATE
              , CA.BUKT 
-             , SUM(AMT)		AS QTY 
-          FROM TB_CM_ACTUAL_SALES S
+             , ROUND(SUM(SAL_AMT), 2)		AS QTY 
+          FROM DS_TB_IF_SALESPLAN_DIVSAL S
          INNER JOIN CA 
-         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
-         INNER JOIN TB_CM_ITEM_MST IM 
-         	ON S.ITEM_MST_ID = IM.ID 
-           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+         	ON S.YYYYMM = CA.BUKT           
          INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
-         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+         	ON S.DIV_COD = IH.DESCENDANT_CD
          INNER JOIN ITEM_HIER IH2 
          	ON IH2.DESC_CD = IH.ANCESTER_CD
          WHERE 1=1 
-           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
-           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
-         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE
+           AND IH2.ANCS_CD LIKE p_ITEM||'%' 
+           AND CA.STRT_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
+         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE        
     )
+--    , SA AS (
+--        SELECT IH2.ANCS_CD 	AS ITEM_CD
+--             , CA.STRT_DATE
+--             , CA.BUKT 
+--             , SUM(AMT)		AS QTY 
+--          FROM TB_CM_ACTUAL_SALES S
+--         INNER JOIN CA 
+--         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
+--         INNER JOIN TB_CM_ITEM_MST IM 
+--         	ON S.ITEM_MST_ID = IM.ID 
+--           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+--         INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
+--         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+--         INNER JOIN ITEM_HIER IH2 
+--         	ON IH2.DESC_CD = IH.ANCESTER_CD
+--         WHERE 1=1 
+----           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
+--           AND IH2.ANCS_CD LIKE p_ITEM||'%' 
+--           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
+--         GROUP BY IH2.ANCS_CD, CA.BUKT, CA.STRT_DATE
+--    )
     , N AS (
         SELECT RT.ITEM_CD		AS ITEM_CD
              , CA.BUKT
@@ -230,7 +270,7 @@ BEGIN
          INNER JOIN CA 
          	ON RT.BASE_DATE BETWEEN CA.STRT_DATE AND END_DATE
     	 GROUP BY ITEM_CD, CA.BUKT, ENGINE_TP_CD 
-         UNION
+         UNION ALL
         SELECT SA.ITEM_CD
              , BUKT
              , 'Z_ACT_SALES'	AS ENGINE_TP_CD
@@ -265,7 +305,7 @@ BEGIN
        AND M.ENGINE_TP_CD = N.ENGINE_TP_CD
      INNER JOIN TB_CM_CALENDAR C 
         ON M.BUKT = C.YYYYMM           
-     WHERE C.DD = 1 
+     WHERE C.DD = '1' 
      ORDER BY M.ENGINE_TP_CD, M.STRT_DATE
      ;
    COMMIT;
@@ -314,25 +354,42 @@ BEGIN
          GROUP BY BUKT 
     )
     , SA AS (
-        SELECT IH2.DESC_CD 	AS ITEM_CD
+   		SELECT IH2.DESC_CD 	AS ITEM_CD
              , CA.STRT_DATE
              , CA.BUKT 
-             , SUM(AMT)		AS QTY 
-          FROM TB_CM_ACTUAL_SALES S
+             , ROUND(SUM(SAL_AMT), 2)		AS QTY 
+          FROM DS_TB_IF_SALESPLAN_DIVSAL S
          INNER JOIN CA 
-         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
-         INNER JOIN TB_CM_ITEM_MST IM 
-         	ON S.ITEM_MST_ID = IM.ID 
-           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+         	ON S.YYYYMM = CA.BUKT           
          INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
-         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+         	ON S.DIV_COD = IH.DESCENDANT_CD
          INNER JOIN ITEM_HIER IH2 
          	ON IH2.DESC_CD = IH.ANCESTER_CD
          WHERE 1=1 
-           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
-           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE
-         GROUP BY IH2.DESC_CD, CA.BUKT, CA.STRT_DATE
+           AND IH2.ANCS_CD LIKE p_ITEM||'%' 
+           AND CA.STRT_DATE BETWEEN p_FROM_DATE AND v_TO_DATE 
+         GROUP BY IH2.DESC_CD, CA.BUKT, CA.STRT_DATE        
     )
+--    , SA AS (
+--        SELECT IH2.DESC_CD 	AS ITEM_CD
+--             , CA.STRT_DATE
+--             , CA.BUKT 
+--             , SUM(AMT)		AS QTY 
+--          FROM TB_CM_ACTUAL_SALES S
+--         INNER JOIN CA 
+--         	ON S.BASE_DATE BETWEEN CA.STRT_DATE AND CA.END_DATE
+--         INNER JOIN TB_CM_ITEM_MST IM 
+--         	ON S.ITEM_MST_ID = IM.ID 
+--           AND COALESCE(IM.DEL_YN,'N') = 'N'           
+--         INNER JOIN TB_DPD_ITEM_HIER_CLOSURE IH 
+--         	ON IM.ITEM_CD = IH.DESCENDANT_CD
+--         INNER JOIN ITEM_HIER IH2 
+--         	ON IH2.DESC_CD = IH.ANCESTER_CD
+--         WHERE 1=1 
+--           AND IH.ANCESTER_CD LIKE p_ITEM||'%'
+--           AND BASE_DATE BETWEEN p_FROM_DATE AND v_TO_DATE
+--         GROUP BY IH2.DESC_CD, CA.BUKT, CA.STRT_DATE
+--    )
     , N AS (
         SELECT RT.ITEM_CD		AS ITEM_CD
              , CA.BUKT
@@ -342,7 +399,7 @@ BEGIN
          INNER JOIN CA 
          	ON RT.BASE_DATE BETWEEN CA.STRT_DATE AND END_DATE
     	 GROUP BY ITEM_CD, CA.BUKT, ENGINE_TP_CD 
-         UNION
+         UNION ALL
         SELECT SA.ITEM_CD
              , BUKT
              , 'Z_ACT_SALES'	AS ENGINE_TP_CD
@@ -377,7 +434,7 @@ BEGIN
        AND M.ENGINE_TP_CD = N.ENGINE_TP_CD
      INNER JOIN TB_CM_CALENDAR C 
         ON M.BUKT = C.YYYYMM           
-     WHERE C.DD = 1 
+     WHERE C.DD = '1' 
      ORDER BY M.ITEM_CD, M.ENGINE_TP_CD, M.STRT_DATE
      ;
    COMMIT;  

@@ -1,88 +1,336 @@
-CREATE OR REPLACE procedure DWSCM_DEV."SP_UI_BF_00_MAKE_FACTOR" 
+CREATE OR REPLACE procedure DWSCM."SP_UI_BF_00_MAKE_FACTOR" 
 (
-	p_FACTOR_NM 		VARCHAR2,
-	p_FACTOR_DESC		VARCHAR2,
-	p_FROM_DATE	 		DATE,
-	p_TO_DATE			DATE,
-	p_APPLY_FROM_DATE	DATE,
-	p_APPLY_TO_DATE		DATE,
-	pRESULT				OUT SYS_REFCURSOR
+		P_RT_ROLLBACK_FLAG			OUT VARCHAR2   
+      , P_RT_MSG					OUT VARCHAR2
 )
 IS 
+  /**************************************************************************
+   * Copyrightⓒ2023 ZIONEX, All rights reserved.
+   **************************************************************************
+   * Name : SP_UI_BF_00_MAKE_FACTOR
+   * Purpose : 특수일 / 품목별 생성
+   * Notes :
+   **************************************************************************/
 	p_FACTOR_CD			VARCHAR2(100);
-	v_sql				VARCHAR2(32767);
+	p_COL_NM			VARCHAR2(100);
+	v_MAX_CNT			NUMBER;
+	v_MAX_CNT2			NUMBER;
+	v_FACTOR_DESCRIP	VARCHAR2(100);
+	v_FROM_DATE			DATE;
+	v_TO_DATE			DATE;
+	v_APPLY_FROM_DATE 	DATE;
+	v_APPLY_TO_DATE		DATE;
+	v_SQL				VARCHAR2(4000);
+	v_ITEM				VARCHAR2(100);
+	a VARCHAR2(20);
+	b VARCHAR2(200);
+	c VARCHAR2(50);
 BEGIN
-	BEGIN
-		SELECT 'FACTOR'||LPAD(SUBSTR(FACTOR_CD, 7) + 1, 2, '0') INTO p_FACTOR_CD
-		  FROM (SELECT FACTOR_CD 
-		 		  FROM TB_BF_FACTOR_MGMT
-				 WHERE FACTOR_CD LIKE 'FACTOR%' AND ROWNUM = 1
-				 ORDER BY 1 DESC);
-		EXCEPTION
+	SELECT TRUNC(ADD_MONTHS(SYSDATE, -38), 'IW')
+		 , TRUNC(ADD_MONTHS(SYSDATE, 12), 'IW') - 1 
+	  INTO v_APPLY_FROM_DATE
+	  	 , v_APPLY_TO_DATE
+	  FROM DUAL;
+	 
+	DELETE FROM TB_BF_FACTOR_MGMT
+     WHERE EXTEND_YN = 'N';	 
+    
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE TB_BF_DATE_FACTOR';
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE TB_BF_SALES_FACTOR';
+   
+	SELECT COUNT(*)	INTO v_MAX_CNT
+	FROM ADDWCDC.SC036H 
+	WHERE YEAR = TO_CHAR(SYSDATE, 'YYYY')
+	  AND EVT_MCD IN ('SES','SRZ')
+	  AND USE_YN = 'Y';
+	
+	SELECT COUNT (DISTINCT A.EVT_NAM) INTO v_MAX_CNT2
+	  FROM ADDWCDC.SC036H A
+		 , ADDWCDC.SC036T B 
+	 WHERE A.MNG_NUM=B.MNG_NUM 
+	   AND A.YEAR = TO_CHAR(SYSDATE,'YYYY')
+	   AND A.USE_YN = 'Y'
+	   AND TRUNC(SYSDATE) BETWEEN A.STA_DAY AND A.END_DAY
+	   AND TRUNC(SYSDATE) BETWEEN B.STA_DAY AND B.END_DAY; 
+	
+	/* 일자별 인자 생성 */  
+	  
+	FOR i IN 1..v_MAX_CNT
+	LOOP
+		SELECT EVT_NAM
+			 , STA_DAY
+			 , END_DAY
+		  INTO 
+		  	   v_FACTOR_DESCRIP
+		  	 , v_FROM_DATE
+		  	 , v_TO_DATE
+		  FROM (
+				SELECT EVT_NAM
+					 , STA_DAY
+					 , END_DAY
+					 , ROWNUM AS RW
+				  FROM ADDWCDC.SC036H 
+				 WHERE 1=1
+				   AND EVT_MCD IN ('SES','SRZ')
+				   AND USE_YN = 'Y'
+				)
+		 WHERE RW = i;
+		
+		 BEGIN
+		 SELECT 'FACTOR'||LPAD(SUBSTR(FACTOR_CD, 7) + 1, 2, '0') INTO p_FACTOR_CD
+		   FROM (SELECT FACTOR_CD 
+		 		   FROM TB_BF_FACTOR_MGMT
+				  WHERE FACTOR_CD LIKE 'FACTOR%'
+				    AND ROWNUM = 1
+				  ORDER BY 1 DESC);
+		 EXCEPTION
 			WHEN NO_DATA_FOUND THEN
 				p_FACTOR_CD := 'FACTOR01';
-	END;
-
-	EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_DATE_FACTOR2';
-
-	v_sql := ' INSERT INTO TB_BF_FACTOR_MGMT (
-				  FACTOR_CD 
-			    , COL_NM 
-				, DESCRIP
-				, EXTEND_YN
-				, CREATE_BY
-				, CREATE_DTTM
-				, MODIFY_BY
-				, MODIFY_DTTM
-				, ACTV_YN
-				, DEL_YN
-				) 
-				SELECT ''' || p_FACTOR_CD || ''' AS FACTOR_CD
-				     , ''' || p_FACTOR_NM || ''' AS COL_NM
-					 , ''' || p_FACTOR_DESC || ''' AS DESCRIP
-					 , ''N'' AS EXTEND_YN
-					 , ''admin'' AS CREATE_BY
-					 , SYSDATE AS CREATE_DTTM
-					 , NULL AS MODIFY_BY
-					 , NULL AS MODIFY_DTTM
-					 , ''N'' AS ACTV_YN
-					 , ''N'' AS DEL_YN
-				FROM DUAL';
-		EXECUTE IMMEDIATE v_sql;
+	     END;
+			
+	     BEGIN
+ 		 SELECT 'FACTOR'||COL_NM AS COL_NM INTO p_COL_NM
+		   FROM (SELECT TO_NUMBER(SUBSTR(COL_NM, 7)) + 1 AS COL_NM
+		 		   FROM TB_BF_FACTOR_MGMT
+				  WHERE COL_NM LIKE 'FACTOR%' 
+				  ORDER BY 1 DESC)
+		  WHERE ROWNUM = 1;
+		 EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				p_COL_NM := 'FACTOR1';
+		 END;
+		
+		 INSERT INTO TB_BF_FACTOR_MGMT (
+			SELECT p_FACTOR_CD
+				 , p_COL_NM
+				 , v_FACTOR_DESCRIP
+				 , 'N' AS EXTEND_YN
+				 , 'admin'
+				 , SYSDATE AS CREATE_DTTM
+				 , NULL AS MODIFY_BY
+				 , NULL AS MODIFY_DTTM
+				 , 'Y' AS ACTV_YN
+				 , 'N' AS DEL_YN
+			FROM DUAL);
+	  
+		COMMIT;
+	  
+		v_SQL := 'MERGE INTO TB_BF_DATE_FACTOR A USING(
+					 WITH MMDD AS (
+						SELECT DISTINCT SUBSTR(DAT_ID, 5) AS DAT_ID
+						  FROM TB_CM_CALENDAR 
+						 WHERE DAT BETWEEN ''' || v_FROM_DATE || ''' AND ''' || v_TO_DATE || '''
+					 ), 
+					 FCT AS (
+						SELECT CA.DAT
+							 , 1 AS ' || p_COL_NM || '
+						  FROM TB_CM_CALENDAR CA 
+						 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+					 ),
+					 NEW_FCT AS (
+						SELECT RAWTOHEX(SYS_GUID()) AS ID
+							 , CA.DAT AS BASE_DATE
+							 , NVL(FCT.' || p_COL_NM ||', 0) AS ' || p_COL_NM ||'
+						  FROM TB_CM_CALENDAR CA
+						  LEFT JOIN FCT ON CA.DAT = FCT.DAT
+					     WHERE CA.DAT BETWEEN ''' || v_APPLY_FROM_DATE || ''' AND ''' || v_APPLY_TO_DATE || '''
+						 ORDER BY 1
+					 ) SELECT * FROM NEW_FCT) B ON (A.BASE_DATE = B.BASE_DATE)
+						 WHEN MATCHED THEN
+							UPDATE SET A.' || p_COL_NM || ' = B.' || p_COL_NM || '
+						 WHEN NOT MATCHED THEN 
+							INSERT(ID, BASE_DATE, ' || p_COL_NM || ', CREATE_BY, CREATE_DTTM)
+							VALUES(B.ID, B.BASE_DATE, B.' || p_COL_NM || ', ''admin'', SYSDATE)';
+					
+		EXECUTE IMMEDIATE v_SQL;
+	  
+		COMMIT;
+	  
+	END LOOP;
 	
-	v_sql := 'INSERT INTO TEMP_DATE_FACTOR2 (
-					ID, 
-					BASE_DATE,	
-					' || p_FACTOR_CD || '
-				 )
-				 WITH MMDD AS (
-					SELECT DISTINCT SUBSTR(DAT_ID, 5) AS DAT_ID
-					  FROM TB_CM_CALENDAR 
-					 WHERE DAT BETWEEN ''' || p_FROM_DATE || ''' AND ''' || p_TO_DATE || '''
-				 ), 
-				 FCT AS (
-					SELECT CA.DAT
-						 , 1 AS ' || p_FACTOR_CD || ' 
-					  FROM TB_CM_CALENDAR CA 
-					 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
-				 ),
-				 NEW_FCT AS (
-					SELECT RAWTOHEX(SYS_GUID()) AS ID
-						 , CA.DAT AS BASE_DATE
-						 , CASE WHEN FCT.' || p_FACTOR_CD || ' IS NULL THEN 0 ELSE FCT.' || p_FACTOR_CD || ' END AS ' || p_FACTOR_CD || '
-					  FROM TB_CM_CALENDAR CA
-					  LEFT JOIN FCT ON CA.DAT = FCT.DAT
-				     WHERE CA.DAT BETWEEN ''' || p_APPLY_FROM_DATE || ''' AND ''' || p_APPLY_TO_DATE || '''
-					 ORDER BY 1
-				 ) SELECT * FROM NEW_FCT';
-				
-		EXECUTE IMMEDIATE v_sql;
-						 
-		v_sql := 'UPDATE TB_BF_DATE_FACTOR DF
-				 SET DF.' || p_FACTOR_CD || ' = (SELECT ' || p_FACTOR_CD || '
-												   FROM TEMP_DATE_FACTOR2 DF2 
-												  WHERE DF.BASE_DATE = DF2.BASE_DATE)';
-		EXECUTE IMMEDIATE v_sql;		
+	/* 품목별 인자 생성 */
 
-	OPEN pRESULT FOR 'SELECT * FROM TB_BF_FACTOR_MGMT';
+	SELECT COUNT(DISTINCT A.EVT_NAM) INTO v_MAX_CNT
+	  FROM ADDWCDC.SC036H A
+		 , ADDWCDC.SC036T B 
+	 WHERE A.MNG_NUM = B.MNG_NUM 
+	   AND A.YEAR = TO_CHAR(SYSDATE,'YYYY')
+	   AND A.USE_YN = 'Y'
+	   AND TRUNC(SYSDATE) BETWEEN A.STA_DAY AND A.END_DAY
+	   AND TRUNC(SYSDATE) BETWEEN B.STA_DAY AND B.END_DAY;
+	  	  
+	FOR i IN 1..v_MAX_CNT
+	LOOP
+		SELECT EVT_NAM INTO v_FACTOR_DESCRIP
+		  FROM (
+			  SELECT EVT_NAM
+			  	   , ROWNUM AS RW
+			  	FROM (
+					SELECT DISTINCT A.EVT_NAM--이벤트 이름
+					FROM ADDWCDC.SC036H A
+					   , ADDWCDC.SC036T B 
+					WHERE A.MNG_NUM = B.MNG_NUM 
+					AND A.YEAR = TO_CHAR(SYSDATE,'YYYY')
+					AND A.USE_YN='Y'
+					AND TRUNC(SYSDATE) BETWEEN A.STA_DAY AND A.END_DAY
+					AND TRUNC(SYSDATE) BETWEEN B.STA_DAY AND B.END_DAY
+					)
+			   )
+		 WHERE RW = i;
+		 
+		 BEGIN
+	  	 SELECT 'SALES_FACTOR'||LPAD(SUBSTR(FACTOR_CD, 13) + 1, 2, '0') INTO p_FACTOR_CD
+		   FROM (SELECT FACTOR_CD 
+		 		   FROM TB_BF_FACTOR_MGMT
+				  WHERE FACTOR_CD LIKE 'SALES_FACTOR%'
+				    AND ROWNUM = 1
+				  ORDER BY 1 DESC);
+		 EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				p_FACTOR_CD := 'SALES_FACTOR01';
+		 END;
+		
+ 		 BEGIN
+ 		 SELECT 'SALES_FACTOR'||COL_NM AS COL_NM INTO p_COL_NM
+		   FROM (SELECT TO_NUMBER(SUBSTR(COL_NM, 13)) + 1 AS COL_NM
+		 		   FROM TB_BF_FACTOR_MGMT
+				  WHERE COL_NM LIKE 'SALES_FACTOR%' 
+				  ORDER BY 1 DESC)
+		  WHERE ROWNUM = 1;
+		 EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				p_COL_NM := 'SALES_FACTOR1';
+		 END;
+		
+		INSERT INTO TB_BF_FACTOR_MGMT (
+			SELECT p_FACTOR_CD
+				 , p_COL_NM
+				 , v_FACTOR_DESCRIP
+				 , 'N' AS EXTEND_YN
+				 , 'admin'
+				 , SYSDATE AS CREATE_DTTM
+				 , NULL AS MODIFY_BY
+				 , NULL AS MODIFY_DTTM
+				 , 'Y' AS ACTV_YN
+				 , 'N' AS DEL_YN
+			FROM DUAL);
+		
+		 COMMIT;
+		
+		    SELECT COUNT(DISTINCT B.GDS_NUM) INTO v_MAX_CNT2
+			  FROM ADDWCDC.SC036H A
+			     , ADDWCDC.SC036T B 
+			 WHERE A.MNG_NUM = B.MNG_NUM 
+			   AND A.YEAR = TO_CHAR(SYSDATE,'YYYY')
+			   AND A.USE_YN='Y'
+			   AND TRUNC(SYSDATE) BETWEEN A.STA_DAY AND A.END_DAY
+			   AND TRUNC(SYSDATE) BETWEEN B.STA_DAY AND B.END_DAY
+			   AND A.EVT_NAM = v_FACTOR_DESCRIP;
+		
+		 FOR i IN 1..v_MAX_CNT2
+		 	LOOP
+				SELECT ITEM_CD 
+					 , STA_DAY
+					 , END_DAY
+				  INTO 
+				  	   v_ITEM
+				  	 , v_FROM_DATE
+				  	 , v_TO_DATE
+				  FROM (SELECT DISTINCT B.GDS_NUM AS ITEM_CD
+				  			 , B.STA_DAY
+				  			 , B.END_DAY
+				 		     , ROWNUM AS RW
+						  FROM ADDWCDC.SC036H A
+						     , ADDWCDC.SC036T B 
+ 						 WHERE A.MNG_NUM = B.MNG_NUM 
+						   AND A.YEAR = TO_CHAR(SYSDATE,'YYYY')
+						   AND A.USE_YN='Y'
+						   AND TRUNC(SYSDATE) BETWEEN A.STA_DAY AND A.END_DAY
+						   AND TRUNC(SYSDATE) BETWEEN B.STA_DAY AND B.END_DAY
+						   AND A.EVT_NAM = v_FACTOR_DESCRIP
+						)
+				 WHERE RW = i;
+	 			v_SQL := 'MERGE INTO TB_BF_SALES_FACTOR A USING(
+							 WITH MMDD AS (
+								SELECT DISTINCT SUBSTR(DAT_ID, 5) AS DAT_ID
+								  FROM TB_CM_CALENDAR 
+								 WHERE DAT BETWEEN ''' || v_FROM_DATE || ''' AND ''' || v_TO_DATE || '''
+							 ), 
+							 FCT AS (
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''01_POS'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+								 UNION ALL 
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''01_SHP'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+								 UNION ALL 
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''04_POS'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+								 UNION ALL 
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''04_SHP'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+								 UNION ALL 
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''05_POS'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+								 UNION ALL 
+								SELECT CA.DAT
+									 , ' || v_ITEM ||' AS ITEM_CD
+									 , ''05_SHP'' AS ACCOUNT_CD
+									 , 1 AS ' || p_COL_NM || '
+								  FROM TB_CM_CALENDAR CA 
+								 INNER JOIN MMDD ON SUBSTR(CA.DAT_ID, 5) = MMDD.DAT_ID
+							 ),
+							 NEW_FCT AS (
+								SELECT RAWTOHEX(SYS_GUID()) AS ID
+									 , CA.DAT AS BASE_DATE
+						 			 , ITEM_CD
+									 , ACCOUNT_CD
+									 , NVL(FCT.' || p_COL_NM ||', 0) AS ' || p_COL_NM ||'
+								  FROM TB_CM_CALENDAR CA
+								  INNER JOIN FCT ON CA.DAT = FCT.DAT
+							     WHERE CA.DAT BETWEEN ''' || v_APPLY_FROM_DATE || ''' AND ''' || v_APPLY_TO_DATE || '''
+							 ) SELECT * FROM NEW_FCT) B 
+								ON (A.BASE_DATE = B.BASE_DATE AND A.ITEM_CD = B.ITEM_CD AND A.ACCOUNT_CD = B.ACCOUNT_CD)
+								 WHEN MATCHED THEN
+									UPDATE SET A.' || p_COL_NM || ' = B.' || p_COL_NM || '
+								 WHEN NOT MATCHED THEN 
+									INSERT(ID, BASE_DATE, ITEM_CD, ACCOUNT_CD,  ' || p_COL_NM || ', CREATE_BY, CREATE_DTTM)
+									VALUES(B.ID, B.BASE_DATE, B.ITEM_CD, B.ACCOUNT_CD, B.' || p_COL_NM || ', ''admin'', SYSDATE)';
+				EXECUTE IMMEDIATE v_SQL;
+				COMMIT;
+				END LOOP;
+	 END LOOP;
+	
+	EXCEPTION WHEN OTHERS THEN
+		ROLLBACK;
+	
+		a := SQLCODE;
+		b := SQLERRM;
+		c := SYS.dbms_utility.format_error_backtrace;
+	
+		BEGIN
+			INSERT INTO TB_SCM100M_ERR_LOG(ERR_FILE, ERR_CODE, ERR_MSG, ERR_LINE, ERR_DTTM)
+			SELECT 'SP_UI_BF_00_MAKE_FACTOR', a, b, c, SYSDATE FROM DUAL;
+		
+			COMMIT;
+		END;
 END;

@@ -10,6 +10,17 @@ CREATE OR REPLACE PROCEDURE DWSCM."SP_UI_BF_50_MA_Q1"
     p_SUM				VARCHAR2 := 'Y',
     pRESULT             OUT SYS_REFCURSOR
 )IS 
+  /**************************************************************************
+   * Copyrightⓒ2023 ZIONEX, All rights reserved.
+   **************************************************************************
+   * Name : SP_UI_BF_50_MA_Q1
+   * Purpose : 월/총량 수요예측 결과 그리드 조회
+   * Notes :
+   * 	M20180115092445697M411878346346N	ITEM_ALL	상품전체
+		N20180115092528519N506441512113N	LEVEL1		대분류
+		N20180115092559329M499525073971N	LEVEL2		중분류
+		FA5FEBBCADDED90DE053DD0A10AC8DB5	LEVEL3		소분류
+   **************************************************************************/
     p_ACCURACY          VARCHAR2(30);
 BEGIN
     SELECT RULE_01 INTO p_ACCURACY
@@ -17,12 +28,13 @@ BEGIN
      WHERE VER_CD = p_VER_CD
        AND (PROCESS_NO = '990000' OR PROCESS_NO = '990')
        ;
-      
-    DELETE FROM TEMP_ITEM_HIER2;  
-    COMMIT;
-   
-   	INSERT INTO TEMP_ITEM_HIER2 (
-        SELECT IH.DESCENDANT_ID AS DESC_ID
+    
+    /* 합계 조회 O, BEST SELECT Y인 경우 */
+    IF p_SUM = 'Y' AND p_BEST_SELECT_YN = 'Y'
+    THEN
+    OPEN pRESULT FOR
+    WITH IDS AS (
+    	SELECT IH.DESCENDANT_ID AS DESC_ID
              , IH.DESCENDANT_CD AS DESC_CD
              , IH.DESCENDANT_NM AS DESC_NM
              , IH.ANCESTER_CD 	AS ANCS_CD
@@ -35,12 +47,8 @@ BEGIN
            AND LENGTH(IH.DESCENDANT_CD) = 4
            AND IH.LEAF_YN = 'N'
            AND ANCESTER_CD LIKE p_ITEM||'%'  
-	);
-    
-    IF p_SUM = 'Y' AND p_BEST_SELECT_YN = 'Y'
-    THEN
-    OPEN pRESULT FOR
-    WITH RT AS (
+	)
+    , RT AS (
         SELECT B.ITEM_CD
         	 , B.ITEM_NM
              , B.BASE_DATE
@@ -58,7 +66,7 @@ BEGIN
 				 , RT.ENGINE_TP_CD
 				 , VER_CD
 			  FROM TB_BF_RT_MA RT
-			 INNER JOIN TEMP_ITEM_HIER2 IH 
+			 INNER JOIN IDS IH 
 			 	ON IH.DESC_CD = RT.ITEM_CD
 			 INNER JOIN (SELECT ITEM_CD
 			 				  , ENGINE_TP_CD
@@ -87,11 +95,27 @@ BEGIN
 	 ORDER BY ITEM_CD, ENGINE_TP_CD, BASE_DATE
     ;
     COMMIT;
-   
+    
+    /* 합계 조회 O, BEST SELECT N인 조건 */
     ELSIF p_SUM = 'Y' AND p_BEST_SELECT_YN = 'N'
     THEN
     OPEN pRESULT FOR
-    WITH RT AS (
+    WITH IDS AS (
+    	SELECT IH.DESCENDANT_ID AS DESC_ID
+             , IH.DESCENDANT_CD AS DESC_CD
+             , IH.DESCENDANT_NM AS DESC_NM
+             , IH.ANCESTER_CD 	AS ANCS_CD
+             , IL.ITEM_LV_NM 	AS ANCS_NM
+          FROM TB_DPD_ITEM_HIER_CLOSURE IH
+         INNER JOIN TB_CM_ITEM_LEVEL_MGMT IL 
+         	ON IH.ANCESTER_ID = IL.ID
+         WHERE 1=1
+           AND IL.LV_MGMT_ID = p_ITEM_LV
+           AND LENGTH(IH.DESCENDANT_CD) = 4
+           AND IH.LEAF_YN = 'N'
+           AND ANCESTER_CD LIKE p_ITEM||'%'  
+	)
+    , RT AS (
         SELECT IH.ANCS_CD 	AS ITEM_CD
       		 , IH.ANCS_NM 	AS ITEM_NM
   			 , BASE_DATE
@@ -101,7 +125,7 @@ BEGIN
   			 , SUM(QTY) 	AS QTY
 			 , VER_CD
 		  FROM TB_BF_RT_MA RT
-		 INNER JOIN TEMP_ITEM_HIER2 IH 
+		 INNER JOIN IDS IH 
 		    ON IH.DESC_CD = RT.ITEM_CD
 		 WHERE 1=1
 		   AND VER_CD = p_VER_CD
@@ -125,7 +149,22 @@ BEGIN
    
 	ELSE
     OPEN pRESULT FOR
-    WITH RT AS (
+    WITH IDS AS (
+   	 	SELECT IH.DESCENDANT_ID AS DESC_ID
+             , IH.DESCENDANT_CD AS DESC_CD
+             , IH.DESCENDANT_NM AS DESC_NM
+             , IH.ANCESTER_CD 	AS ANCS_CD
+             , IL.ITEM_LV_NM 	AS ANCS_NM
+          FROM TB_DPD_ITEM_HIER_CLOSURE IH
+         INNER JOIN TB_CM_ITEM_LEVEL_MGMT IL 
+         	ON IH.ANCESTER_ID = IL.ID
+         WHERE 1=1
+           AND IL.LV_MGMT_ID = p_ITEM_LV
+           AND LENGTH(IH.DESCENDANT_CD) = 4
+           AND IH.LEAF_YN = 'N'
+           AND ANCESTER_CD LIKE p_ITEM||'%'  
+	)
+    , RT AS (
         SELECT B.ITEM_CD
         	 , B.ITEM_NM
              , B.BASE_DATE
@@ -148,7 +187,7 @@ BEGIN
 	  			 , QTY
 				 , ENGINE_TP_CD 
 			  FROM TB_BF_RT_MA RT
-			 INNER JOIN TEMP_ITEM_HIER2 IH 
+			 INNER JOIN IDS IH 
 			 	ON IH.DESC_CD = RT.ITEM_CD
 			 WHERE VER_CD = p_VER_CD
 			   AND BASE_DATE BETWEEN p_FROM_DATE AND p_TO_DATE

@@ -1,29 +1,65 @@
 CREATE OR REPLACE PROCEDURE DWSCM."SP_UI_BF_00_MONTHLY" (
-		p_VER_CD  			VARCHAR2
-	  , P_RT_ROLLBACK_FLAG	OUT VARCHAR2   
-      , P_RT_MSG			OUT VARCHAR2
+		P_RT_ROLLBACK_FLAG	OUT VARCHAR2   
+      , P_RT_MSG			OUT VARCHAR2 
 )
 IS
+  /**************************************************************************
+   * Copyrightⓒ2023 ZIONEX, All rights reserved.
+   **************************************************************************
+   * Name : SP_UI_BF_00_MONTHLY
+   * Purpose : 주 단위 예측 결과를 월 단위로 집계
+   * Notes :
+   **************************************************************************/
+	p_VER_CD			VARCHAR2(100);
 	p_FROM_DATE 	 	DATE;
 	p_TO_DATE 		 	DATE;
 	p_TARGET_FROM_DATE  DATE;
 	v_VER_CD 		 	VARCHAR2(100);
+	t_VER_CD			VARCHAR2(100);
 	out1 			 	VARCHAR2(100);
     out2 			 	VARCHAR2(100);
+    a VARCHAR2(20);
+	b VARCHAR2(200);
+	c VARCHAR2(50);
 
 BEGIN
+	/* 가장 최근 버전코드 */
+	SELECT MAX(VER_CD)
+	  INTO p_VER_CD
+	  FROM TB_BF_CONTROL_BOARD_VER_DTL 
+	 WHERE VER_CD LIKE 'BF-%'
+--	   AND EXTRACT(MONTH FROM RUN_STRT_DATE) = EXTRACT(MONTH FROM SYSDATE)  -- 매월 말일에 수행할 경우
+	   AND EXTRACT(MONTH FROM RUN_STRT_DATE) = EXTRACT(MONTH FROM ADD_MONTHS(SYSDATE, -1))  -- 매월 1일에 수행할 경우
+	;
+	 
+	SELECT VER_CD
+      INTO t_VER_CD
+      FROM (
+        SELECT VER_CD
+          FROM TB_BF_CONTROL_BOARD_VER_DTL
+         WHERE ROWNUM < 2 AND VER_CD LIKE 'BFM-%'
+         ORDER BY VER_CD DESC
+           );
+    /* 해당 월의 1일로 버전코드 명명 */
+    SELECT CASE WHEN SUBSTR(t_VER_CD,5,8) != TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMMDD')
+                     THEN 'BFM-' || TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMMDD') || '-01'
+                WHEN SUBSTR(t_VER_CD,5,8) = TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMMDD')
+                     THEN 'BFM-' || TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMMDD') || '-' || TO_CHAR(TO_NUMBER(SUBSTR(t_VER_CD, 14, 2)) + 1, 'fm00')
+                END AS VER_CD
+      INTO v_VER_CD
+      FROM DUAL;
+
 	SELECT MAX(TARGET_FROM_DATE)
 		 , MAX(TARGET_TO_DATE)
 		 , ADD_MONTHS(TRUNC(MAX(TARGET_FROM_DATE),'MM'), 1) 
-		 , REPLACE(MAX(VER_CD), 'BF-', 'BFM-')
 		   INTO
 	 	   p_FROM_DATE
 	     , p_TO_DATE
 	     , p_TARGET_FROM_DATE
-	     , v_VER_CD
 	FROM TB_BF_CONTROL_BOARD_VER_DTL
-	WHERE VER_CD = p_VER_CD;	
+	WHERE VER_CD = p_VER_CD;
 
+	/* 월 예측 버전 생성 */
 	INSERT INTO TB_BF_CONTROL_BOARD_VER_DTL (
 		SELECT RAWTOHEX(SYS_GUID()) 	AS ID
 			 , v_VER_CD		 			AS VER_CD
@@ -60,14 +96,26 @@ BEGIN
 			 , NULL 	AS MODIFY_DTTM
 			 , SHARD_NO
 			 , VAL_TP
-		  FROM TB_BF_CONTROL_BOARD_VER_DTL tbcbvd
+		  FROM TB_BF_CONTROL_BOARD_VER_DTL
 		 WHERE VER_CD=p_VER_CD
 	);
+
+	COMMIT;
+
+	UPDATE TB_BF_CONTROL_BOARD_VER_DTL
+	SET INPUT_TO_DATE = NULL,
+		TARGET_FROM_DATE = NULL
+	WHERE VER_CD = v_VER_CD AND PROCESS_NO IN (1, 990000, 1000000);
+
+	COMMIT;
 
 	UPDATE TB_BF_CONTROL_BOARD_VER_DTL
 	SET STATUS = 'Ready'
 	WHERE PROCESS_NO IN (990000, 1000000) AND VER_CD = v_VER_CD;
 
+	COMMIT;
+
+	/* 월 예측 결과 생성(PARTIAL WEEK 적용) */
 	INSERT INTO TB_BF_RT_M
 	WITH RT AS (
 		SELECT BASE_DATE + 0	AS FROM_DATE
@@ -78,6 +126,9 @@ BEGIN
 		     , QTY
 		 FROM TB_BF_RT
 		WHERE VER_CD = p_VER_CD
+--		  AND REGEXP_INSTR(ITEM_CD,'[^0-9]') = 0 
+		  AND LENGTH(ITEM_CD) > 4
+		  AND ENGINE_TP_CD != 'ZAUTO'
 	) 
 	, CAL AS (
 	    SELECT MIN(DAT)				AS FROM_DATE
@@ -88,15 +139,16 @@ BEGIN
 	     WHERE DAT BETWEEN p_FROM_DATE AND p_TO_DATE
 	  GROUP BY YYYY, MM, TO_CHAR(DP_WK)
 	)
+	/* PARTIAL WEEK 적용 */
 	, PW_RT AS (
-			SELECT CAL.FROM_DATE AS BASE_DATE
-				 , ITEM_CD
-				 , ACCOUNT_CD
-				 , ENGINE_TP_CD
-				 , CAL.MM
-			 	 , ROUND(RT.QTY * CAL.DAT_CNT / (RT.TO_DATE-RT.FROM_DATE+1))  AS QTY
-		 	  FROM RT 
-			 INNER JOIN CAL ON CAL.FROM_DATE BETWEEN RT.FROM_DATE AND RT.TO_DATE
+		SELECT CAL.FROM_DATE AS BASE_DATE
+			 , ITEM_CD
+			 , ACCOUNT_CD
+			 , ENGINE_TP_CD
+			 , CAL.MM
+		 	 , ROUND(RT.QTY * CAL.DAT_CNT / (RT.TO_DATE-RT.FROM_DATE+1))  AS QTY
+	 	  FROM RT 
+		 INNER JOIN CAL ON CAL.FROM_DATE BETWEEN RT.FROM_DATE AND RT.TO_DATE
 	) 
 	, M_RT AS (
 		SELECT MIN(BASE_DATE) AS BASE_DATE
@@ -109,7 +161,7 @@ BEGIN
 		GROUP BY ITEM_CD, ACCOUNT_CD, ENGINE_TP_CD, MM
 	) SELECT RAWTOHEX(SYS_GUID()) 			  AS ID
 		   , ENGINE_TP_CD
-		   , REPLACE(p_VER_CD, 'BF-', 'BFM-') AS VER_CD
+		   , v_VER_CD AS VER_CD
 		   , ITEM_CD
 		   , ACCOUNT_CD
 		   , BASE_DATE
@@ -121,7 +173,8 @@ BEGIN
 		FROM M_RT;
 	
 	COMMIT;
-
+	
+	/* 월 단위 예측 히스토리 생성 */
 	MERGE INTO TB_BF_RT_HISTORY_M TGT
         USING (
             SELECT ID
@@ -174,20 +227,29 @@ BEGIN
     COMMIT;
        
     BEGIN
+	    /* 월 단위 예측 정확도 계산 */
         SP_UI_BF_16_RT_S2_M(v_VER_CD, 'System', 'WAPE', 990000, out1, out2);
-        SP_UI_BF_16_RT_S3_M(v_VER_CD, 'System', 'WAPE', NULL, 1000000, out1, out2);
+        /* 월 단위 예측값 결정 */
+        SP_UI_BF_16_RT_S3_M(v_VER_CD, 'System', 'WAPE', 'PW', 1000000, out1, out2);
+        /* 월 단위 품목 시즌지수 생성 */
+        SP_UI_BF_00_SEASONAL_INDEX_M(v_VER_CD, out1, out2);
+        /* 월 단위 소분류 시즌지수 생성 */
+        SP_UI_BF_00_CATE_SEASONAL_INDEX_M(v_VER_CD, out1, out2);
     END;
    
-    P_RT_ROLLBACK_FLAG := 'true';
-    P_RT_MSG := 'MSG_0001';  --저장 되었습니다.
-
-   EXCEPTION
-    WHEN OTHERS THEN 
-          IF(SQLCODE = -20001)
-          THEN
-              P_RT_ROLLBACK_FLAG := 'false';
-              P_RT_MSG := sqlerrm;
-          ELSE
-            SP_COMM_RAISE_ERR();
-          END IF;
+   	COMMIT;
+   
+	EXCEPTION WHEN OTHERS THEN
+		ROLLBACK;
+	
+		a := SQLCODE;
+		b := SQLERRM;
+		c := SYS.dbms_utility.format_error_backtrace;
+	
+		BEGIN
+			INSERT INTO TB_SCM100M_ERR_LOG(ERR_FILE, ERR_CODE, ERR_MSG, ERR_LINE, ERR_DTTM)
+			SELECT 'SP_UI_BF_00_MONTHLY', a, b, c, SYSDATE FROM DUAL;
+		
+			COMMIT;
+		END;         
 END;

@@ -1,0 +1,156 @@
+CREATE OR REPLACE PROCEDURE DWSCM."SP_UI_BF_00_SHP_RATIO" (
+      p_VER_CD VARCHAR2
+    , P_RT_ROLLBACK_FLAG			OUT VARCHAR2   
+    , P_RT_MSG						OUT VARCHAR2
+)
+IS
+  /**************************************************************************
+   * Copyrightⓒ2023 ZIONEX, All rights reserved.
+   **************************************************************************
+   * Name : SP_UI_BF_00_SHP_RATIO
+   * Purpose : 주 단위 출고 예측값 일 단위 분배
+   * Notes :
+   **************************************************************************/
+	p_FROM_DATE DATE;	
+	p_TO_DATE DATE;
+	p_TARGET_FROM_DATE DATE;
+	p_TARGET_TO_DATE DATE;
+
+BEGIN
+
+	SELECT MAX(INPUT_TO_DATE)
+		 , MAX(INPUT_TO_DATE) - 27
+		 , MAX(TARGET_FROM_DATE)
+		 , MAX(TARGET_FROM_DATE) + 34
+	  INTO p_TO_DATE
+	  	 , p_FROM_DATE
+	  	 , p_TARGET_FROM_DATE
+	  	 , p_TARGET_TO_DATE
+ 	  FROM TB_BF_CONTROL_BOARD_VER_DTL
+	 WHERE VER_CD = p_VER_CD
+	   AND ENGINE_TP_CD IS NOT NULL;
+ 
+	DELETE TB_BF_RT_SHP_D 
+	 WHERE VER_CD = p_VER_CD;
+	COMMIT;
+	  
+	INSERT INTO TB_BF_RT_SHP_D
+	/* 주 단위 출고 실적 예측값 */
+	WITH RT AS (
+		SELECT VER_CD
+			 , BASE_DATE
+			 , DP_WK
+			 , ITEM_CD
+			 , ACCOUNT_CD
+			 , BEST_ENGINE_TP_CD AS ENGINE_TP_CD
+			 , QTY
+		  FROM TB_BF_RT_FINAL_SHP RT 
+		 INNER JOIN TB_CM_CALENDAR CA 
+		 	ON RT.BASE_DATE = CA.DAT
+		 WHERE VER_CD = p_VER_CD
+		   AND BASE_DATE <= p_TARGET_TO_DATE
+	)
+	/* 분배 비율을 구하기 위한 학습구간 마지막 한 달 실적 */
+	, SA AS (
+		SELECT A.BASE_DATE	
+			 , A.DOW
+			 , A.ITEM_CD
+			 , A.ACCOUNT_CD
+			 , CASE WHEN A.DOW=7 THEN 0 ELSE NVL(AMT, 0) END AS QTY 
+		 FROM (SELECT DISTINCT ITEM_CD
+					, ACCOUNT_CD
+					, DAT AS BASE_DATE
+					, DOW 
+				 FROM TB_CM_ACTUAL_SALES_SHP S
+			    CROSS JOIN (SELECT DISTINCT DAT, DOW 
+							  FROM TB_CM_CALENDAR 
+						     WHERE DAT BETWEEN p_FROM_DATE AND p_TO_DATE)
+	          ) A
+		 LEFT JOIN (SELECT ITEM_CD
+		 	 			 , ACCOUNT_CD
+		 	 			 , BASE_DATE
+		 	 			 , AMT 
+		 	 		  FROM TB_CM_ACTUAL_SALES_SHP 
+		 	 		 WHERE BASE_DATE BETWEEN p_FROM_DATE AND p_TO_DATE) B
+		   ON A.ITEM_CD = B.ITEM_CD 
+		  AND A.ACCOUNT_CD = B.ACCOUNT_CD 
+		  AND A.BASE_DATE = B.BASE_DATE
+	) 
+	, SUM_SA AS (
+		SELECT ITEM_CD
+			 , ACCOUNT_CD
+			 , SUM(QTY) AS SUM_QTY
+		  FROM SA
+		 GROUP BY ITEM_CD, ACCOUNT_CD
+	) 
+	/* 분배 비율 계산 */
+	, AGG_SA AS (
+		SELECT DOW
+			 , SA.ITEM_CD
+			 , SA.ACCOUNT_CD
+			 , SUM(SA.QTY) / SA2.SUM_QTY AS RATIO
+		  FROM SA
+		 INNER JOIN SUM_SA SA2 
+		    ON SA.ITEM_CD = SA2.ITEM_CD 
+		   AND SA.ACCOUNT_CD = SA2.ACCOUNT_CD
+		 GROUP BY DOW, SA.ITEM_CD, SA.ACCOUNT_CD, SA2.SUM_QTY
+	)
+	, CAL AS (
+		SELECT DAT AS BASE_DATE
+			 , DOW
+			 , DP_WK
+		  FROM TB_CM_CALENDAR
+		 WHERE DAT BETWEEN p_TARGET_FROM_DATE AND p_TARGET_TO_DATE
+	) 
+	/* 분배 비율 단차 계산 */
+	, RATIO AS (
+		SELECT VER_CD
+			 , BASE_DATE
+			 , DOW
+			 , DP_WK
+			 , ITEM_CD
+			 , ACCOUNT_CD
+			 , ENGINE_TP_CD
+			 , CASE WHEN A.SEQ = 1 THEN A.QTY + A.DIFF ELSE A.QTY END AS QTY
+		FROM (
+			SELECT VER_CD
+			 	 , BASE_DATE
+				 , SA.DOW
+				 , RT.DP_WK
+				 , RT.ITEM_CD
+				 , RT.ACCOUNT_CD
+				 , ENGINE_TP_CD
+				 , ROUND(QTY * RATIO) AS QTY 
+				 , RT.QTY - SUM(ROUND(QTY * RATIO)) OVER (PARTITION BY RT.ITEM_CD, RT.ACCOUNT_CD, RT.BASE_DATE) AS DIFF
+				 , ROW_NUMBER() OVER (PARTITION BY RT.ITEM_CD, RT.ACCOUNT_CD, RT.BASE_DATE ORDER BY ROUND(QTY * RATIO) DESC) AS SEQ
+			FROM RT 
+		   INNER JOIN AGG_SA SA 
+		   	  ON RT.ITEM_CD = SA.ITEM_CD 
+		   	 AND RT.ACCOUNT_CD = SA.ACCOUNT_CD) A
+	) 
+	, RT2 AS (
+		SELECT VER_CD
+		 	 , CAL.BASE_DATE
+			 , RT.ITEM_CD
+			 , RT.ACCOUNT_CD
+			 , ENGINE_TP_CD
+			 , QTY 
+		  FROM RATIO RT 
+		 INNER JOIN CAL 
+		 	ON RT.DOW = CAL.DOW 
+		   AND RT.DP_WK = CAL.DP_WK
+	) 
+	SELECT RAWTOHEX(SYS_GUID()) AS ID
+	 	 , VER_CD
+	 	 , ITEM_CD
+	 	 , ACCOUNT_CD
+	 	 , BASE_DATE
+	 	 , ENGINE_TP_CD
+	 	 , QTY
+	 	 , 'SYSTEM' AS CREATE_BY
+	 	 , SYSDATE AS CREATE_DTTM
+	 	 , NULL AS MODIFY_BY
+	 	 , NULL AS MODIFY_DTTM
+	 	 FROM RT2;
+	COMMIT;
+END;
