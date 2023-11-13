@@ -1,0 +1,170 @@
+CREATE OR REPLACE PROCEDURE DWSCM."SP_ASDS_RP_TARGET_INV_MNT_Q01" (
+	P_VER_ID			IN VARCHAR2 := NULL, /*버전ID*/
+	P_ITEM_DIV_CD		IN VARCHAR2 := NULL, /*소분류*/
+	P_PO_SBJ_CD 		IN VARCHAR2 := NULL, /*부서*/
+	P_DC_CD				IN VARCHAR2 := NULL, /*물류센터*/
+	P_PO_MAIN_EMPID		IN VARCHAR2 := NULL, /*발주담당자(주)*/
+	P_MD_EMP_ID       	IN VARCHAR2 := NULL, /*MD*/
+	P_HMP_EMP_CD       	IN VARCHAR2 := NULL, /*발주팀*/
+	P_NAT_DIV          	IN VARCHAR2 := NULL, /*소싱*/ 
+	P_CRITERIA			IN VARCHAR2 := NULL, /*조회기준*/
+	pRESULT				OUT SYS_REFCURSOR
+)
+IS
+/********************************************************************************
+* Name    : SP_ASDS_RP_TARGET_INV_MNT_Q01
+* Purpose : 목표재고유지 Bucket 모니터링 (Grid 1)
+* Notes   :
+*********************************************************************************
+* History :
+* 2023-11-01 YJS CREATE
+*********************************************************************************
+* Execute :
+DECLARE
+	pRESULT SYS_REFCURSOR;
+BEGIN
+	SP_ASDS_RP_TARGET_INV_MNT_Q01('', '', '', '', '', '', '', '', 'DD', pRESULT);
+	DBMS_SQL.RETURN_RESULT(pRESULT);
+END;
+*********************************************************************************/
+BEGIN
+	OPEN pRESULT FOR
+	SELECT T10.LOCAT_CD
+		 , LOCAT_NM
+		 , T10.ITEM_LV_CD
+		 , ITEM_LV_NM
+		 , MD_MAIN_EMPID
+		 , MD_MAIN_EMPNM
+		 , PO_MAIN_EMPID
+		 , PO_MAIN_EMPNM
+		 , PRPSAL_INV_RANGE
+		 , PRPSAL_INV_UNDER
+		 , PRPSAL_INV_OVER
+		 , BOH
+		 , SFST_PRPSAL_VAL
+		 , SFST_VAL
+		 , TARGET_INV_PRPSAL_VAL
+		 , TARGET_INV_VAL
+	  FROM (
+		SELECT T20.LOCAT_CD
+			 , T20.LOCAT_NM
+			 , T20.ITEM_LV_CD
+			 , T20.ITEM_LV_NM  
+			 , T30.MD_MAIN_EMPID
+			 , T30.MD_MAIN_EMPNM
+			 , T30.PO_MAIN_EMPID
+			 , T30.PO_MAIN_EMPNM 
+			 , CASE WHEN P_CRITERIA = 'DD'  THEN ROUND(SUM(T10.SFST_PRPSAL_VAL/T10.AVG_SHPP_ACTUAL_QTY)/COUNT(*), 2)
+			 		WHEN P_CRITERIA = 'QTY' THEN SUM(T10.SFST_PRPSAL_VAL) 		END AS SFST_PRPSAL_VAL	-- 안전재고 제안
+			 , CASE WHEN P_CRITERIA = 'DD'  THEN ROUND(SUM(T10.SFST_VAL/T10.AVG_SHPP_ACTUAL_QTY)/COUNT(*), 2)
+			 		WHEN P_CRITERIA = 'QTY' THEN SUM(T10.SFST_VAL) 			 	END AS SFST_VAL				-- 안전재고 적용		 			 
+			 , CASE WHEN P_CRITERIA = 'DD'  THEN ROUND(SUM(T10.TARGET_INV_PRPSAL_VAL/T10.AVG_SHPP_ACTUAL_QTY)/COUNT(*), 2)
+			 		WHEN P_CRITERIA = 'QTY' THEN SUM(T10.TARGET_INV_PRPSAL_VAL) END AS TARGET_INV_PRPSAL_VAL	   -- 목표재고 제안
+			 , CASE WHEN P_CRITERIA = 'DD'  THEN ROUND(SUM(T10.TARGET_INV_VAL/T10.AVG_SHPP_ACTUAL_QTY)/COUNT(*),2 )
+			 		WHEN P_CRITERIA = 'QTY' THEN SUM(T10.TARGET_INV_VAL) 		END AS TARGET_INV_VAL 				   -- 목표재고 적용
+		  FROM TB_IM_INV_POLICY_ITEM T10
+		 INNER JOIN VW_LOCAT_ITEM_INFO_2 T20 
+			ON T10.LOCAT_ITEM_ID = T20.LOCAT_ITEM_ID
+		 INNER JOIN (SELECT ITEM_CD
+						  , C.EMP_ID AS MD_MAIN_EMPID
+						  , C.EMP_NM AS MD_MAIN_EMPNM
+						  , B.EMP_ID AS PO_MAIN_EMPID
+						  , B.EMP_NM AS PO_MAIN_EMPNM 	 
+						  , ATTR_03  AS KR_FR_SE					  
+						  , ATTR_10  AS PO_SBJ_CD
+						  , ATTR_14  AS HMP_EMP_CD
+					   FROM TB_CM_ITEM_MST T10
+					  INNER JOIN TB_CM_ITEM_LEVEL_MGMT T20
+					     ON T10.PARENT_ITEM_LV_ID = T20.ID
+					  INNER JOIN TB_CM_USER_CATE B
+						 ON T20.ITEM_LV_CD = B.CATEGORY 
+						AND B.ASSIGN = '발주'
+						AND B.MAIN_SUB = '정'
+					  INNER JOIN TB_CM_USER_CATE C
+						 ON T20.ITEM_LV_CD = C.CATEGORY 
+						AND C.ASSIGN = 'MD'
+						AND C.MAIN_SUB = '정'
+					  WHERE ATTR_04 = 1
+					    AND ATTR_10 = 'A00') T30
+			ON T20.ITEM_CD = T30.ITEM_CD
+		 WHERE 1=1	
+		   AND T20.LOCAT_CD IN ( SELECT T20.LOCAT_CD
+		                           FROM TB_CM_LOC_MGMT T10
+		                          INNER JOIN TB_CM_LOC_DTL T20
+		                             ON T10.LOCAT_ID = T20.ID
+		                          INNER JOIN TB_CM_LOC_MST T30
+		                             ON T20.LOCAT_MST_ID = T30.ID
+		                          INNER JOIN TB_AD_COMN_CODE T40
+		                             ON T30.LOCAT_TP_ID = T40.ID
+		                          WHERE T40.COMN_CD_NM = 'CDC')
+	       AND T20.ITEM_LV_CD    LIKE '%'|| P_ITEM_DIV_CD 	||'%' /*소분류*/        
+	       AND T20.LOCAT_CD 	 LIKE '%'|| P_DC_CD 		||'%' /*물류센터*/
+	       AND T30.PO_SBJ_CD 	 LIKE '%'|| P_PO_SBJ_CD 	|| '%' /*부서*/
+	       AND T30.PO_MAIN_EMPID LIKE '%'|| P_PO_MAIN_EMPID ||'%' /*발주담당자(주)*/
+	       AND T30.MD_MAIN_EMPID LIKE '%'|| P_MD_EMP_ID 	||'%' /*MD*/
+	       AND (T30.HMP_EMP_CD 	 LIKE '%'|| P_HMP_EMP_CD 	||'%' OR T30.HMP_EMP_CD IS NULL)/*발주팀*/
+	       AND T10.AVG_SHPP_ACTUAL_QTY != 0
+	       GROUP BY T20.LOCAT_CD, T20.LOCAT_NM, T20.ITEM_LV_CD, T20.ITEM_LV_NM, T30.MD_MAIN_EMPID, T30.MD_MAIN_EMPNM, T30.PO_MAIN_EMPID, T30.PO_MAIN_EMPNM
+	       ) T10
+       INNER JOIN (SELECT DIV_COD
+						, WHS_COD
+						, COUNT(CASE WHEN WEEK BETWEEN LEAST(SFST_PRPSAL_VAL, TARGET_INV_PRPSAL_VAL) AND GREATEST(SFST_PRPSAL_VAL, TARGET_INV_PRPSAL_VAL) THEN 1 END) AS PRPSAL_INV_RANGE
+						, COUNT(CASE WHEN WEEK < LEAST(SFST_PRPSAL_VAL, TARGET_INV_PRPSAL_VAL) THEN 1 END) AS PRPSAL_INV_UNDER
+						, COUNT(CASE WHEN WEEK > GREATEST(SFST_PRPSAL_VAL, TARGET_INV_PRPSAL_VAL) THEN 1 END) AS PRPSAL_INV_OVER
+					 FROM (SELECT B.DIV_NM
+							    , A.*
+							    , C.SFST_PRPSAL_VAL
+							    , C.TARGET_INV_PRPSAL_VAL
+							 FROM DS_IF_WEEK_DIVINVPLN A
+						    INNER JOIN VW_IMRP_MEASURE B
+							   ON A.INV_PLN_DIV = B.DIV_CD
+						     INNER JOIN (SELECT ITEM_LV_CD
+											  , LOCAT_CD
+											  , SUM(SFST_PRPSAL_VAL) AS SFST_PRPSAL_VAL
+											  , SUM(TARGET_INV_PRPSAL_VAL) AS TARGET_INV_PRPSAL_VAL 
+										   FROM VW_LOCAT_ITEM_INFO_2									 
+										  WHERE ITEM_LV_CD  LIKE '%'|| P_ITEM_DIV_CD ||'%'
+										    AND LOCAT_CD    LIKE '%'|| P_DC_CD 		 ||'%'
+										  GROUP BY ITEM_LV_CD, LOCAT_CD) C  
+								ON A.DIV_COD = C.ITEM_LV_CD
+							   AND A.WHS_COD = C.LOCAT_CD
+							 WHERE INV_PLN_DIV = 41 AND IO_DAY = P_VER_ID)
+							UNPIVOT (WEEK FOR WK IN (W00, W01, W02, W03, W04, W05, 
+													 W06, W07, W08, W09, W10, W11, 
+													 W12, W13, W14, W15, W16, W17, 
+													 W18, W19, W20, W21, W22, W23, W24, W25))
+					GROUP BY DIV_COD, WHS_COD) T20
+		  ON T10.ITEM_LV_CD = T20.DIV_COD
+		 AND T10.LOCAT_CD = T20.WHS_COD
+ 	   INNER JOIN (SELECT T20.ITEM_LV_CD
+		 				, T20.LOCAT_CD
+	     				, CASE WHEN P_CRITERIA = 'DD'  THEN ROUND(SUM(DTL.QTY/T30.AVG_SHPP_ACTUAL_QTY)/COUNT(*), 2)
+							   WHEN P_CRITERIA = 'QTY' THEN SUM(DTL.QTY) END AS BOH
+			           FROM TB_CM_INTRANSIT_STOCK_MST MST
+			          INNER JOIN TB_CM_INTRANSIT_STOCK_QTY DTL
+			             ON MST.ID = DTL.INTRANSIT_INV_MST_ID
+			          INNER JOIN (SELECT TO_LOCAT_ITEM_ID, MAX(CUTOFF_DATE) AS CUTOFF_DATE FROM TB_CM_INTRANSIT_STOCK_MST GROUP BY TO_LOCAT_ITEM_ID) MST2
+			             ON MST.TO_LOCAT_ITEM_ID = MST2.TO_LOCAT_ITEM_ID
+			            AND MST.CUTOFF_DATE = MST2.CUTOFF_DATE   
+			          INNER JOIN VW_LOCAT_ITEM_INFO_2 T20 
+						 ON MST.TO_LOCAT_ITEM_ID = T20.LOCAT_ITEM_ID
+					  INNER JOIN TB_IM_INV_POLICY_ITEM T30
+					     ON T20.LOCAT_ITEM_ID = T30.LOCAT_ITEM_ID
+					  WHERE LOCAT_CD IN (SELECT T20.LOCAT_CD
+				                           FROM TB_CM_LOC_MGMT T10
+				                          INNER JOIN TB_CM_LOC_DTL T20
+				                             ON T10.LOCAT_ID = T20.ID
+				                          INNER JOIN TB_CM_LOC_MST T30
+				                             ON T20.LOCAT_MST_ID = T30.ID
+				                          INNER JOIN TB_AD_COMN_CODE T40
+				                             ON T30.LOCAT_TP_ID = T40.ID
+				                          WHERE T40.COMN_CD_NM = 'CDC')
+					    AND T20.ITEM_LV_CD  LIKE '%'|| P_ITEM_DIV_CD ||'%'
+					    AND T20.LOCAT_CD    LIKE '%'|| P_DC_CD ||'%'
+					    AND T30.AVG_SHPP_ACTUAL_QTY != 0
+			          GROUP BY T20.ITEM_LV_CD, T20.LOCAT_CD) T30
+		    ON T10.ITEM_LV_CD = T30.ITEM_LV_CD			
+		   AND T10.LOCAT_CD = T30.LOCAT_CD		 		 
+       ORDER BY LOCAT_CD, PRPSAL_INV_RANGE DESC, ITEM_LV_CD	       
+		;
+END;

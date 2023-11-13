@@ -1,0 +1,420 @@
+CREATE OR REPLACE PROCEDURE DWSCM."SP_ASDS_RP_MM_INV_PLN_ACC_Q01" (
+	P_VER_ID			IN VARCHAR2 := NULL, /*실적월*/	
+	P_DC_CD				IN VARCHAR2 := NULL, /*물류센터*/	
+	P_ITEM_DIV_CD		IN VARCHAR2 := NULL, /*소분류*/
+	P_MD_EMP_ID       	IN VARCHAR2 := NULL, /*MD*/	
+	P_PO_EMP_ID			IN VARCHAR2 := NULL, /*발주담당자*/
+	pRESULT				OUT SYS_REFCURSOR
+)
+IS
+/********************************************************************************
+* Name    : SP_ASDS_RP_MM_INV_PLN_ACC_Q01
+* Purpose : 재고계획 준수율 (월간) (Grid 1)
+* Notes   :
+*********************************************************************************
+* History :
+* 2023-11-09 YJS CREATE
+*********************************************************************************
+* Execute :
+DECLARE
+	pRESULT SYS_REFCURSOR;
+BEGIN
+	SP_ASDS_RP_MM_INV_PLN_ACC_Q01('202310', '', '', '', '', pRESULT);
+	DBMS_SQL.RETURN_RESULT(pRESULT);
+END;
+*********************************************************************************/
+BEGIN
+	OPEN pRESULT FOR
+	WITH INV AS (
+		SELECT IO_YYYYMM
+			 , DIV_COD
+			 , WHS_COD
+			 , CASE WHEN ABS(DMND_M00 - ACT_M00) = 0 THEN 100
+				    ELSE (CASE WHEN (1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M00			    		  
+			 , CASE WHEN ABS(DMND_M01 - ACT_M01) = 0 THEN 100
+					ELSE (CASE WHEN (1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M01				
+			 , CASE WHEN ABS(DMND_M02 - ACT_M02) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M02	
+			 , CASE WHEN ABS(DMND_M03 - ACT_M03) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M03 - ACT_M03)/(ACT_M03 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M03 - ACT_M03)/(ACT_M03 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M03				
+			 , CASE WHEN ABS(DMND_M04 - ACT_M04) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M04 - ACT_M04)/(ACT_M04 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M04 - ACT_M04)/(ACT_M04 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M04				
+			 , CASE WHEN ABS(DMND_M05 - ACT_M05) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M05 - ACT_M05)/(ACT_M05 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M05 - ACT_M05)/(ACT_M05 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M05				
+			 , CASE WHEN ABS(DMND_M06 - ACT_M06) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M06 - ACT_M06)/(ACT_M06 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M06 - ACT_M06)/(ACT_M06 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M06				
+			 , CASE WHEN ABS(DMND_M07 - ACT_M07) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M07 - ACT_M07)/(ACT_M07 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M07 - ACT_M07)/(ACT_M07 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M07				
+			 , CASE WHEN ABS(DMND_M08 - ACT_M08) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M08 - ACT_M08)/(ACT_M08 + 0.0001))	>= 0 THEN ROUND((1-ABS(DMND_M08 - ACT_M08)/(ACT_M08 + 0.0001))*100,1)
+							   ELSE 0 END) END AS INV_ACC_M08				
+			 , CASE WHEN ABS(DMND_M09 - ACT_M09) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M09 - ACT_M09)/(ACT_M09 + 0.0001))	>= 0 THEN ROUND((1-ABS(DMND_M09 - ACT_M09)/(ACT_M09 + 0.0001))*100,1) 
+							   ELSE 0 END) END AS INV_ACC_M09				
+			 , CASE WHEN ABS(DMND_M10 - ACT_M10) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M10 - ACT_M10)/(ACT_M10 + 0.0001))	>= 0 THEN ROUND((1-ABS(DMND_M10 - ACT_M10)/(ACT_M10 + 0.0001))*100,1) 
+							   ELSE 0 END) END AS INV_ACC_M10				
+			 , CASE WHEN ABS(DMND_M11 - ACT_M11) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M11 - ACT_M11)/(ACT_M11 + 0.0001))	>= 0 THEN ROUND((1-ABS(DMND_M11 - ACT_M11)/(ACT_M11 + 0.0001))*100,1) 	 
+							   ELSE 0 END) END AS INV_ACC_M11			
+		  FROM (SELECT A.IO_YYYYMM
+					 , A.DIV_COD
+					 , A.WHS_COD
+					 , A.M00 AS DMND_M00
+					 , A.M01 AS DMND_M01
+					 , A.M02 AS DMND_M02
+					 , A.M03 AS DMND_M03
+					 , A.M04 AS DMND_M04
+					 , A.M05 AS DMND_M05
+					 , A.M06 AS DMND_M06
+					 , A.M07 AS DMND_M07
+					 , A.M08 AS DMND_M08
+					 , A.M09 AS DMND_M09
+					 , A.M10 AS DMND_M10
+					 , A.M11 AS DMND_M11
+					 , B.M00 AS ACT_M00
+					 , B.M01 AS ACT_M01
+					 , B.M02 AS ACT_M02
+					 , B.M03 AS ACT_M03
+					 , B.M04 AS ACT_M04
+					 , B.M05 AS ACT_M05
+					 , B.M06 AS ACT_M06
+					 , B.M07 AS ACT_M07
+					 , B.M08 AS ACT_M08
+					 , B.M09 AS ACT_M09
+					 , B.M10 AS ACT_M10
+					 , B.M11 AS ACT_M11	 
+				 FROM (SELECT IO_YYYYMM
+				 	 		, DIV_COD
+				 	 		, WHS_COD
+				 	 		, SUM(M00) AS M00
+				 	 		, SUM(M01) AS M01
+				 	 		, SUM(M02) AS M02
+				 	 		, SUM(M03) AS M03
+				 	 		, SUM(M04) AS M04
+				 	 		, SUM(M05) AS M05
+				 	 		, SUM(M06) AS M06
+				 	 		, SUM(M07) AS M07
+				 	 		, SUM(M08) AS M08
+				 	 		, SUM(M09) AS M09
+				 	 		, SUM(M10) AS M10
+				 	 		, SUM(M11) AS M11
+				 	     FROM MONDIVINVPLN
+				 	    WHERE INV_PLN_DIV = 45
+				 	      AND INV_PLN_ID = P_VER_ID
+				 	      AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+				 	      AND WHS_COD LIKE '%'|| P_DC_CD 	   ||'%'
+				 	    GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) A
+				INNER JOIN (SELECT IO_YYYYMM
+					 	 		 , DIV_COD
+					 	 		 , WHS_COD
+					 	 		 , SUM(M00) AS M00
+					 	 		 , SUM(M01) AS M01
+					 	 		 , SUM(M02) AS M02
+					 	 	 	 , SUM(M03) AS M03
+					 	 		 , SUM(M04) AS M04
+					 	 		 , SUM(M05) AS M05
+					 	 	 	 , SUM(M06) AS M06
+					 	  		 , SUM(M07) AS M07
+					 	 		 , SUM(M08) AS M08
+					 	 		 , SUM(M09) AS M09
+					 	 		 , SUM(M10) AS M10
+					 	 		 , SUM(M11) AS M11
+					 	      FROM MONDIVINVPLN
+					 	     WHERE INV_PLN_DIV = 15
+					 	       AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+					 	       AND WHS_COD LIKE '%'|| P_DC_CD 	   ||'%'
+					 	     GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) B
+				   ON A.IO_YYYYMM = B.IO_YYYYMM
+				  AND A.DIV_COD = B.DIV_COD
+				  AND A.WHS_COD = B.WHS_COD)
+	)
+	, RLS AS (
+		SELECT IO_YYYYMM
+			 , DIV_COD
+			 , WHS_COD
+			 , CASE WHEN ABS(DMND_M00 - ACT_M00) = 0 THEN 100
+				    ELSE (CASE WHEN (1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001))*100,1)
+							   ELSE 0 END) END AS RLS_ACC_M00			    		  
+			 , CASE WHEN ABS(DMND_M01 - ACT_M01) = 0 THEN 100
+					ELSE (CASE WHEN (1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001))*100,1)
+							   ELSE 0 END) END AS RLS_ACC_M01				
+			 , CASE WHEN ABS(DMND_M02 - ACT_M02) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001)) >=  0 THEN ROUND((1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001))*100,1)
+							   ELSE 0 END) END AS RLS_ACC_M02						
+		  FROM (SELECT A.IO_YYYYMM
+					 , A.DIV_COD
+					 , A.WHS_COD
+					 , A.M00 AS DMND_M00
+					 , A.M01 AS DMND_M01
+					 , A.M02 AS DMND_M02
+					 , B.M00 AS ACT_M00
+					 , B.M01 AS ACT_M01
+					 , B.M02 AS ACT_M02	 
+				 FROM (SELECT IO_YYYYMM
+				 	 		, DIV_COD
+				 	 		, WHS_COD
+				 	 		, SUM(M00) AS M00
+				 	 		, SUM(M01) AS M01
+				 	 		, SUM(M02) AS M02
+				 	     FROM MONDIVINVPLN
+				 	    WHERE INV_PLN_DIV = 35
+				 	      AND INV_PLN_ID = P_VER_ID
+				 	      AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+				 	      AND WHS_COD LIKE '%'|| P_DC_CD 	   ||'%'
+				 	    GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) A 				
+				INNER JOIN (SELECT IO_YYYYMM
+					 	 		 , DIV_COD
+					 	 		 , WHS_COD
+					 	 		 , SUM(M00) AS M00
+					 	 		 , SUM(M01) AS M01
+					 	 		 , SUM(M02) AS M02
+					 	      FROM MONDIVINVPLN 
+					 	     WHERE INV_PLN_DIV = 09
+					 	       AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+					 	       AND WHS_COD LIKE '%'|| P_DC_CD 	   ||'%'
+					 	     GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) B
+				   ON A.IO_YYYYMM = B.IO_YYYYMM
+				  AND A.DIV_COD = B.DIV_COD
+				  AND A.WHS_COD = B.WHS_COD)
+	)
+	, ORD AS (
+		SELECT IO_YYYYMM
+			 , DIV_COD
+			 , WHS_COD
+			 , CASE WHEN ABS(DMND_M00 - ACT_M00) = 0 THEN 100
+				    ELSE (CASE WHEN (1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001))*100,1)
+							   ELSE 0 END) END AS ORD_ACC_M00			    		  
+			 , CASE WHEN ABS(DMND_M01 - ACT_M01) = 0 THEN 100
+					ELSE (CASE WHEN (1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001))*100,1)
+							   ELSE 0 END) END AS ORD_ACC_M01				
+			 , CASE WHEN ABS(DMND_M02 - ACT_M02) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001))*100,1)
+							   ELSE 0 END) END AS ORD_ACC_M02					
+		  FROM (SELECT A.IO_YYYYMM
+					 , A.DIV_COD
+					 , A.WHS_COD
+					 , A.M00 AS DMND_M00
+					 , A.M01 AS DMND_M01
+					 , A.M02 AS DMND_M02
+					 , B.M00 AS ACT_M00
+					 , B.M01 AS ACT_M01
+					 , B.M02 AS ACT_M02	 
+				  FROM (SELECT IO_YYYYMM
+				 	 		 , DIV_COD
+				 	 		 , WHS_COD
+				 	 		 , SUM(M00) AS M00
+				 	 		 , SUM(M01) AS M01
+				 	 		 , SUM(M02) AS M02
+				 	      FROM MONDIVINVPLN
+				 	     WHERE INV_PLN_DIV = 56
+ 				 	       AND INV_PLN_ID = P_VER_ID
+				 	       AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+				 	       AND WHS_COD LIKE '%'|| P_DC_CD 	    ||'%'
+				 	     GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) A 				
+			     INNER JOIN (SELECT IO_YYYYMM
+					 	 		  , DIV_COD
+					 	 		  , WHS_COD
+					 	 		  , SUM(M00) AS M00
+					 	 		  , SUM(M01) AS M01
+					 	 		  , SUM(M02) AS M02
+					 	       FROM MONDIVINVPLN 
+					 	      WHERE INV_PLN_DIV = 05
+					 	        AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+					 	        AND WHS_COD LIKE '%'|| P_DC_CD 	   ||'%'
+					 	      GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) B
+				    ON A.IO_YYYYMM = B.IO_YYYYMM
+				   AND A.DIV_COD = B.DIV_COD
+				   AND A.WHS_COD = B.WHS_COD
+				)
+	)
+	, STCK AS (
+		SELECT IO_YYYYMM
+			 , DIV_COD
+			 , WHS_COD
+			 , CASE WHEN ABS(DMND_M00 - ACT_M00) = 0 THEN 100
+				    ELSE (CASE WHEN (1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M00 - ACT_M00)/(ACT_M00 + 0.0001))*100,1)
+							   ELSE 0 END) END AS STCK_ACC_M00			    		  
+			 , CASE WHEN ABS(DMND_M01 - ACT_M01) = 0 THEN 100
+					ELSE (CASE WHEN (1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M01 - ACT_M01)/(ACT_M01 + 0.0001))*100,1)
+							   ELSE 0 END) END AS STCK_ACC_M01				
+			 , CASE WHEN ABS(DMND_M02 - ACT_M02) = 0 THEN 100 
+					ELSE (CASE WHEN (1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001)) >= 0 THEN ROUND((1-ABS(DMND_M02 - ACT_M02)/(ACT_M02 + 0.0001))*100,1)
+							   ELSE 0 END) END AS STCK_ACC_M02							
+		  FROM (SELECT A.IO_YYYYMM
+					 , A.DIV_COD
+					 , A.WHS_COD
+					 , A.M00 AS DMND_M00
+					 , A.M01 AS DMND_M01
+					 , A.M02 AS DMND_M02
+					 , B.M00 AS ACT_M00
+					 , B.M01 AS ACT_M01
+					 , B.M02 AS ACT_M02	 
+				  FROM (SELECT IO_YYYYMM
+							 , DIV_COD
+							 , WHS_COD
+							 , SUM(M00) AS M00
+	 						 , SUM(M01) AS M01
+							 , SUM(M02) AS M02
+						  FROM MONDIVINVPLN
+						 WHERE INV_PLN_DIV IN (33, 34)
+						   AND INV_PLN_ID = P_VER_ID
+						   AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+						   AND WHS_COD LIKE '%'|| P_DC_CD 		||'%'
+					 	 GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) A
+				 INNER JOIN (SELECT IO_YYYYMM
+								  , DIV_COD
+								  , WHS_COD
+								  , SUM(M00) AS M00
+		 						  , SUM(M01) AS M01
+								  , SUM(M02) AS M02
+							   FROM MONDIVINVPLN
+							  WHERE INV_PLN_DIV IN (03, 04)
+							    AND DIV_COD LIKE '%'|| P_ITEM_DIV_CD ||'%'
+							    AND WHS_COD LIKE '%'|| P_DC_CD 		 ||'%'
+							  GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) B
+					ON A.IO_YYYYMM = B.IO_YYYYMM
+				   AND A.DIV_COD = B.DIV_COD
+				   AND A.WHS_COD = B.WHS_COD
+				)
+	)
+	, AVG_TABLE AS (
+		SELECT A.IO_YYYYMM
+			 , A.DIV_COD
+			 , A.WHS_COD
+			 , INV_AVG
+			 , RLS_AVG
+			 , ORD_AVG
+			 , STCK_AVG
+		  FROM (SELECT IO_YYYYMM
+					 , DIV_COD
+					 , WHS_COD
+					 , ROUND(AVG(MM), 1) AS INV_AVG
+				  FROM INV
+			   UNPIVOT (MM FOR AVG IN (INV_ACC_M00, INV_ACC_M01, INV_ACC_M02))
+			     GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) A
+		 INNER JOIN (SELECT IO_YYYYMM
+						  , DIV_COD
+						  , WHS_COD
+						  , ROUND(AVG(MM), 1) AS RLS_AVG
+					   FROM RLS
+				    UNPIVOT (MM FOR AVG IN (RLS_ACC_M00, RLS_ACC_M01, RLS_ACC_M02))
+				      GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) B
+		    ON A.IO_YYYYMM = B.IO_YYYYMM
+		   AND A.DIV_COD = B.DIV_COD
+		   AND A.WHS_COD = B.WHS_COD
+		 INNER JOIN (SELECT IO_YYYYMM
+						  , DIV_COD
+						  , WHS_COD
+						  , ROUND(AVG(MM), 1) AS ORD_AVG
+					   FROM ORD
+				    UNPIVOT (MM FOR AVG IN (ORD_ACC_M00, ORD_ACC_M01, ORD_ACC_M02))
+				      GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) C
+		    ON A.IO_YYYYMM = C.IO_YYYYMM
+		   AND A.DIV_COD = C.DIV_COD
+		   AND A.WHS_COD = C.WHS_COD
+		 INNER JOIN (SELECT IO_YYYYMM
+						  , DIV_COD
+						  , WHS_COD
+						  , ROUND(AVG(MM), 1) AS STCK_AVG
+					   FROM STCK
+				    UNPIVOT (MM FOR AVG IN (STCK_ACC_M00, STCK_ACC_M01, STCK_ACC_M02))
+				      GROUP BY IO_YYYYMM, DIV_COD, WHS_COD) D
+		    ON A.IO_YYYYMM = D.IO_YYYYMM
+		   AND A.DIV_COD = D.DIV_COD
+		   AND A.WHS_COD = D.WHS_COD
+	) 
+	SELECT G.LOCAT_CD
+		 , G.LOCAT_NM
+		 , F.ITEM_LV_CD
+		 , F.ITEM_LV_NM
+		 , F.MD_MAIN_EMPID
+		 , F.MD_MAIN_EMPNM
+		 , F.PO_MAIN_EMPID
+		 , F.PO_MAIN_EMPNM
+		 , E.INV_AVG
+		 , E.RLS_AVG
+		 , E.ORD_AVG
+		 , E.STCK_AVG
+		 , A.INV_ACC_M00
+		 , B.RLS_ACC_M00
+		 , C.ORD_ACC_M00
+		 , D.STCK_ACC_M00
+		 , A.INV_ACC_M01
+		 , B.RLS_ACC_M01
+		 , C.ORD_ACC_M01
+		 , D.STCK_ACC_M01
+		 , A.INV_ACC_M02
+		 , B.RLS_ACC_M02
+		 , C.ORD_ACC_M02
+		 , D.STCK_ACC_M02
+		 , A.INV_ACC_M03
+		 , A.INV_ACC_M04
+		 , A.INV_ACC_M05
+		 , A.INV_ACC_M06
+		 , A.INV_ACC_M07
+		 , A.INV_ACC_M08
+		 , A.INV_ACC_M09
+		 , A.INV_ACC_M10
+		 , A.INV_ACC_M11	 
+	  FROM INV A
+	 INNER JOIN RLS B
+	    ON A.WHS_COD = B.WHS_COD
+	   AND A.DIV_COD = B.DIV_COD
+	   AND A.IO_YYYYMM = B.IO_YYYYMM
+	 INNER JOIN ORD C
+	    ON A.WHS_COD = C.WHS_COD
+	   AND A.DIV_COD = C.DIV_COD
+	   AND A.IO_YYYYMM = C.IO_YYYYMM
+	 INNER JOIN STCK D
+	    ON A.WHS_COD = D.WHS_COD
+	   AND A.DIV_COD = D.DIV_COD
+	   AND A.IO_YYYYMM = D.IO_YYYYMM
+	 INNER JOIN AVG_TABLE E
+	    ON A.WHS_COD = E.WHS_COD
+	   AND A.DIV_COD = E.DIV_COD
+	   AND A.IO_YYYYMM = E.IO_YYYYMM
+	 INNER JOIN (SELECT ITEM_LV_CD
+					  , ITEM_LV_NM
+					  , PO_MAIN_EMPID
+					  , PO_MAIN_EMPNM
+					  , MD_MAIN_EMPID
+					  , MD_MAIN_EMPNM
+				   FROM (SELECT DISTINCT LVL04_CD AS ITEM_LV_CD, LVL04_NM AS ITEM_LV_NM
+				  		   FROM TB_DPD_ITEM_HIERACHY2) IH
+				  INNER JOIN (SELECT EMP_ID AS PO_MAIN_EMPID
+								   , EMP_NM AS PO_MAIN_EMPNM
+								   , CATEGORY 
+							    FROM TB_CM_USER_CATE
+							   WHERE ASSIGN = '발주'
+							     AND MAIN_SUB = '정'
+							     AND EMP_ID LIKE '%'||P_PO_EMP_ID||'%') ORD
+				     ON IH.ITEM_LV_CD = ORD.CATEGORY
+				  INNER JOIN (SELECT EMP_ID AS MD_MAIN_EMPID
+								   , EMP_NM AS MD_MAIN_EMPNM
+								   , CATEGORY 
+							    FROM TB_CM_USER_CATE
+							   WHERE ASSIGN = 'MD'
+							     AND MAIN_SUB = '정'
+							     AND EMP_ID LIKE '%'||P_MD_EMP_ID||'%') MD
+				     ON IH.ITEM_LV_CD = MD.CATEGORY) F
+	    ON A.DIV_COD = F.ITEM_LV_CD
+	 INNER JOIN (SELECT LOCAT_CD, LOCAT_NM
+				   FROM TB_AD_COMN_CODE A
+				  INNER JOIN TB_CM_LOC_MST B
+					 ON A.ID = B.LOCAT_TP_ID
+				  INNER JOIN TB_CM_LOC_DTL C
+					 ON B.ID = C.LOCAT_MST_ID
+				  WHERE A.COMN_CD_NM = 'CDC') G 
+	    ON A.WHS_COD = G.LOCAT_CD
+	 ORDER BY E.INV_AVG DESC, G.LOCAT_NM, F.ITEM_LV_NM;
+	COMMIT;
+END;
