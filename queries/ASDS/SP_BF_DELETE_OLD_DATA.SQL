@@ -79,31 +79,31 @@ BEGIN
 		
 		/* 월 단위 예측 결과 삭제 */	
 		DELETE FROM TB_BF_RT_M
-		 WHERE VER_CD = v_VER_CD
+		 WHERE VER_CD = v_VER_CD;
 		 
 		COMMIT;
 	
 		/* 월 단위 예측 정확도 삭제 */	
 		DELETE FROM TB_BF_RT_ACCRCY_M
-		 WHERE VER_CD = v_VER_CD
+		 WHERE VER_CD = v_VER_CD;
 		 
 		COMMIT;
 	
 		/* 월 단위 예측 최종 결과 삭제 */	
 		DELETE FROM TB_BF_RT_FINAL_M
-		 WHERE VER_CD = v_VER_CD
+		 WHERE VER_CD = v_VER_CD;
 		 
 		COMMIT;	
 	
 		/* 월 단위 예측 보정 후 결과 삭제 */	
 		DELETE FROM TB_BF_RT_FINAL_M_ADJ
-		 WHERE VER_CD = v_VER_CD
+		 WHERE VER_CD = v_VER_CD;
 		 
 		COMMIT;	
 	
 		/* 월 단위 예측 히스토리 삭제 */	
 		DELETE FROM TB_BF_RT_HISTORY_M
-		 WHERE VER_CD = v_VER_CD
+		 WHERE VER_CD = v_VER_CD;
 		 
 		COMMIT;	
 	END IF;
